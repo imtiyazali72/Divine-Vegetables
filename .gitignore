@@ -1,0 +1,24 @@
+# Node modules (Dependencies)
+node_modules/
+admin-panel/node_modules/
+
+# Production Builds
+dist/
+build/
+admin-panel/dist/
+
+# Python Cache & Virtual Envs
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+venv/
+.venv/
+env/
+
+# IDE & System Files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
