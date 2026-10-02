@@ -3,7 +3,6 @@ services:
   - type: web
     name: divine-veg-backend
     env: python
-    region: singapore
     plan: free
     buildCommand: pip install -r backend/requirements.txt
     startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
@@ -19,15 +18,11 @@ services:
   - type: web
     name: divine-veg-frontend
     env: static
-    region: singapore
     buildCommand: cd admin-panel && npm install && npm run build
     staticPublishPath: admin-panel/dist
     envVars:
       - key: VITE_API_URL
-        fromService:
-          type: web
-          name: divine-veg-backend
-          property: url
+        value: https://divine-veg-backend.onrender.com
     routes:
       - type: rewrite
         source: /*
@@ -38,5 +33,4 @@ databases:
   - name: divine-veg-db
     databaseName: divine_vegetables
     user: divine_user
-    region: singapore
     plan: free
