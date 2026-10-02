@@ -58,30 +58,29 @@ def seed_database():
             with engine.connect() as conn:
                 # Users table migration
                 user_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(users)")).fetchall()]
+                if "security_question" not in user_cols:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN security_question VARCHAR"))
+                if "security_answer" not in user_cols:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN security_answer VARCHAR"))
+                    
+                # Clients table migration
+                client_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(clients)")).fetchall()]
+                if client_cols:
+                    if "is_order_locked" not in client_cols:
+                        conn.execute(text("ALTER TABLE clients ADD COLUMN is_order_locked BOOLEAN DEFAULT 0"))
+                    if "credit_limit" not in client_cols:
+                        conn.execute(text("ALTER TABLE clients ADD COLUMN credit_limit FLOAT DEFAULT 50000.0"))
 
-            if "security_question" not in user_cols:
-                conn.execute(text("ALTER TABLE users ADD COLUMN security_question VARCHAR"))
-            if "security_answer" not in user_cols:
-                conn.execute(text("ALTER TABLE users ADD COLUMN security_answer VARCHAR"))
-                
-            # Clients table migration
-            client_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(clients)")).fetchall()]
-            if client_cols:
-                if "is_order_locked" not in client_cols:
-                    conn.execute(text("ALTER TABLE clients ADD COLUMN is_order_locked BOOLEAN DEFAULT 0"))
-                if "credit_limit" not in client_cols:
-                    conn.execute(text("ALTER TABLE clients ADD COLUMN credit_limit FLOAT DEFAULT 50000.0"))
-
-            # Delivery Routes table migration
-            route_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(delivery_routes)")).fetchall()]
-            if route_cols:
-                if "latitude" not in route_cols:
-                    conn.execute(text("ALTER TABLE delivery_routes ADD COLUMN latitude FLOAT DEFAULT 21.1458"))
-                if "longitude" not in route_cols:
-                    conn.execute(text("ALTER TABLE delivery_routes ADD COLUMN longitude FLOAT DEFAULT 79.0882"))
-                if "updated_at" not in route_cols:
-                    conn.execute(text("ALTER TABLE delivery_routes ADD COLUMN updated_at DATETIME"))
-            conn.commit()
+                # Delivery Routes table migration
+                route_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(delivery_routes)")).fetchall()]
+                if route_cols:
+                    if "latitude" not in route_cols:
+                        conn.execute(text("ALTER TABLE delivery_routes ADD COLUMN latitude FLOAT DEFAULT 21.1458"))
+                    if "longitude" not in route_cols:
+                        conn.execute(text("ALTER TABLE delivery_routes ADD COLUMN longitude FLOAT DEFAULT 79.0882"))
+                    if "updated_at" not in route_cols:
+                        conn.execute(text("ALTER TABLE delivery_routes ADD COLUMN updated_at DATETIME"))
+                conn.commit()
     except Exception as e:
         print("Migration check info:", e)
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { API_BASE as DEFAULT_API_BASE } from '../apiConfig';
+import { API_BASE as DEFAULT_API_BASE, smartFetch } from '../apiConfig';
 
 const DEFAULT_PRODUCTS = [
   { id: 1, name: "Potato (Aloo)", hindi_name: "आलू", category: "Root Vegetables", default_unit: "KG", image_url: "https://images.unsplash.com/photo-1518977676601-b53f82aba655?w=400" },
@@ -81,7 +81,7 @@ export default function ClientPortal({ clients, products, cutoffInfo, onPlaceOrd
   const fetchClientOrders = async (clientId) => {
     if (!clientId) return;
     try {
-      const res = await fetch(`${BASE_URL}/orders?client_id=${clientId}`);
+      const res = await smartFetch(`/orders?client_id=${clientId}`);
       const data = await res.json();
       setClientOrders(data);
     } catch (e) {
@@ -101,7 +101,7 @@ export default function ClientPortal({ clients, products, cutoffInfo, onPlaceOrd
     e.preventDefault();
     setSubmitting(true);
     try {
-      const res = await fetch(`${BASE_URL}/auth/login`, {
+      const res = await smartFetch(`/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: loginPhone, password: loginPass })
@@ -132,7 +132,7 @@ export default function ClientPortal({ clients, products, cutoffInfo, onPlaceOrd
 
     setSubmitting(true);
     try {
-      const res = await fetch(`${BASE_URL}/auth/register-client`, {
+      const res = await smartFetch(`/auth/register-client`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

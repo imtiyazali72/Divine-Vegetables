@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { API_BASE } from '../apiConfig';
 
 export default function Navbar({ activeTab, setActiveTab, viewMode, setViewMode, cutoffInfo, onChangePassword }) {
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -18,7 +19,7 @@ export default function Navbar({ activeTab, setActiveTab, viewMode, setViewMode,
     }
 
     try {
-      const res = await fetch('http://localhost:8000/api/admin/change-password', {
+      const res = await fetch(`${API_BASE}/admin/change-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ old_password: oldPass, new_password: newPass })
