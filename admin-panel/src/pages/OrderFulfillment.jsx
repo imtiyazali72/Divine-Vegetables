@@ -183,38 +183,40 @@ export default function OrderFulfillment({ orders = [], onFulfillWeights, onDele
                 </p>
               </div>
 
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => handleShowUpiQr(selectedOrder.id)}
-                  disabled={loadingUpi}
-                  className="bg-blue-600/90 hover:bg-blue-500 border border-blue-400/40 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-blue-950/50"
-                  title="Generate dynamic UPI payment QR code for GPay/PhonePe"
-                >
-                  📱 {loadingUpi ? 'Loading QR...' : 'UPI QR Code'}
-                </button>
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+                <div className="grid grid-cols-3 gap-1.5 sm:flex sm:items-center sm:gap-2 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={() => handleShowUpiQr(selectedOrder.id)}
+                    disabled={loadingUpi}
+                    className="bg-blue-600/90 hover:bg-blue-500 border border-blue-400/40 text-white font-bold text-xs px-2.5 sm:px-3.5 py-2 rounded-xl flex items-center justify-center gap-1 transition-all shadow-md shadow-blue-950/50"
+                    title="Generate dynamic UPI payment QR code for GPay/PhonePe"
+                  >
+                    📱 {loadingUpi ? '...' : 'UPI QR'}
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => handleWhatsAppShare(selectedOrder.id)}
-                  className="bg-emerald-600/90 hover:bg-emerald-500 border border-emerald-400/40 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-emerald-950/50"
-                  title="Send pre-composed itemized invoice summary on WhatsApp"
-                >
-                  💬 Send WhatsApp Bill
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => handleWhatsAppShare(selectedOrder.id)}
+                    className="bg-emerald-600/90 hover:bg-emerald-500 border border-emerald-400/40 text-white font-bold text-xs px-2.5 sm:px-3.5 py-2 rounded-xl flex items-center justify-center gap-1 transition-all shadow-md shadow-emerald-950/50"
+                    title="Send pre-composed itemized invoice summary on WhatsApp"
+                  >
+                    💬 WhatsApp
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => setOrderToDelete(selectedOrder)}
-                  className="bg-rose-950/70 hover:bg-rose-900 border border-rose-600/50 text-rose-300 font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-md hover:shadow-rose-950/50"
-                  title="Permanently remove duplicate or mistaken order"
-                >
-                  🗑️ Delete Order
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setOrderToDelete(selectedOrder)}
+                    className="bg-rose-950/70 hover:bg-rose-900 border border-rose-600/50 text-rose-300 font-bold text-xs px-2.5 sm:px-3.5 py-2 rounded-xl flex items-center justify-center gap-1 transition-all shadow-md hover:shadow-rose-950/50"
+                    title="Permanently remove duplicate or mistaken order"
+                  >
+                    🗑️ Delete
+                  </button>
+                </div>
 
-                <div className="text-right border-l border-slate-800 pl-4">
+                <div className="text-left sm:text-right border-t sm:border-t-0 sm:border-l border-slate-800 pt-2 sm:pt-0 sm:pl-4 flex justify-between sm:block items-center">
                   <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">RECALCULATED ACTUAL TOTAL</div>
-                  <div className="text-2xl font-black text-emerald-400">
+                  <div className="text-xl sm:text-2xl font-black text-emerald-400">
                     ₹{calculateTotal().toFixed(2)}
                   </div>
                 </div>
@@ -222,53 +224,106 @@ export default function OrderFulfillment({ orders = [], onFulfillWeights, onDele
             </div>
 
             <form onSubmit={handleSubmitFulfillment}>
-              <table className="mb-6">
-                <thead>
-                  <tr>
-                    <th>Item Name</th>
-                    <th>Rate / Unit</th>
-                    <th>Requested Qty</th>
-                    <th>Actual Packed Weight (Enter)</th>
-                    <th>Final Amount (₹)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedOrder.items?.map(item => {
-                    const currentWeight = weights[item.id] !== undefined ? weights[item.id] : (item.actual_packed_qty || item.ordered_qty);
-                    const sub = (parseFloat(currentWeight) || 0) * item.price_per_unit;
-                    const isDiff = parseFloat(currentWeight) !== item.ordered_qty;
+              {/* MOBILE ITEM CARDS VIEW (No horizontal scrolling required!) */}
+              <div className="block sm:hidden space-y-3 mb-6">
+                {selectedOrder.items?.map(item => {
+                  const currentWeight = weights[item.id] !== undefined ? weights[item.id] : (item.actual_packed_qty || item.ordered_qty);
+                  const sub = (parseFloat(currentWeight) || 0) * item.price_per_unit;
+                  const isDiff = parseFloat(currentWeight) !== item.ordered_qty;
 
-                    return (
-                      <tr key={item.id}>
-                        <td>
-                          <div className="font-bold text-white">{item.product_name}</div>
-                          <div className="text-xs text-slate-400">Unit: {item.unit}</div>
-                        </td>
-                        <td className="text-emerald-400 font-bold">₹{item.price_per_unit.toFixed(2)}</td>
-                        <td className="text-slate-300 font-semibold">{item.ordered_qty} {item.unit}</td>
-                        <td>
-                          <div className="flex items-center gap-2">
+                  return (
+                    <div key={item.id} className="bg-slate-900/80 p-3.5 rounded-xl border border-slate-800 space-y-2">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <div className="font-bold text-white text-sm">{item.product_name}</div>
+                          <div className="text-xs text-emerald-400 font-semibold">Rate: ₹{item.price_per_unit.toFixed(2)} / {item.unit}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-[10px] text-slate-400 font-bold">Ordered Qty</div>
+                          <div className="text-xs font-bold text-slate-300">{item.ordered_qty} {item.unit}</div>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 flex justify-between items-center gap-2">
+                        <div>
+                          <label className="text-[10px] text-slate-400 font-bold block uppercase">Actual Packed Weight</label>
+                          <div className="flex items-center gap-1.5 mt-0.5">
                             <input 
                               type="number"
                               step="0.1"
                               value={currentWeight}
                               onChange={e => handleWeightChange(item.id, e.target.value)}
-                              className="w-28 text-white font-bold border-emerald-500/50"
+                              className="w-24 text-sm font-bold text-white bg-slate-900 border border-emerald-500/50 px-2 py-1 rounded-lg"
                             />
                             <span className="text-xs font-bold text-slate-400">{item.unit}</span>
                           </div>
-                          {isDiff && (
-                            <div className="text-[10px] text-amber-400 font-semibold mt-1">
-                              ⚠️ Adj from {item.ordered_qty} {item.unit}
+                        </div>
+                        <div className="text-right">
+                          <div className="text-[10px] text-slate-400 font-bold uppercase">Subtotal</div>
+                          <div className="text-base font-black text-emerald-400">₹{sub.toFixed(2)}</div>
+                        </div>
+                      </div>
+
+                      {isDiff && (
+                        <div className="text-[10px] text-amber-400 font-semibold text-right">
+                          ⚠️ Adjusted from {item.ordered_qty} {item.unit}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* DESKTOP ITEM TABLE VIEW */}
+              <div className="hidden sm:block overflow-x-auto mb-6">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Item Name</th>
+                      <th>Rate / Unit</th>
+                      <th>Requested Qty</th>
+                      <th>Actual Packed Weight (Enter)</th>
+                      <th>Final Amount (₹)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedOrder.items?.map(item => {
+                      const currentWeight = weights[item.id] !== undefined ? weights[item.id] : (item.actual_packed_qty || item.ordered_qty);
+                      const sub = (parseFloat(currentWeight) || 0) * item.price_per_unit;
+                      const isDiff = parseFloat(currentWeight) !== item.ordered_qty;
+
+                      return (
+                        <tr key={item.id}>
+                          <td>
+                            <div className="font-bold text-white">{item.product_name}</div>
+                            <div className="text-xs text-slate-400">Unit: {item.unit}</div>
+                          </td>
+                          <td className="text-emerald-400 font-bold">₹{item.price_per_unit.toFixed(2)}</td>
+                          <td className="text-slate-300 font-semibold">{item.ordered_qty} {item.unit}</td>
+                          <td>
+                            <div className="flex items-center gap-2">
+                              <input 
+                                type="number"
+                                step="0.1"
+                                value={currentWeight}
+                                onChange={e => handleWeightChange(item.id, e.target.value)}
+                                className="w-28 text-white font-bold border-emerald-500/50"
+                              />
+                              <span className="text-xs font-bold text-slate-400">{item.unit}</span>
                             </div>
-                          )}
-                        </td>
-                        <td className="font-bold text-white">₹{sub.toFixed(2)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                            {isDiff && (
+                              <div className="text-[10px] text-amber-400 font-semibold mt-1">
+                                ⚠️ Adj from {item.ordered_qty} {item.unit}
+                              </div>
+                            )}
+                          </td>
+                          <td className="font-bold text-white">₹{sub.toFixed(2)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
 
               <div className="flex justify-between items-center gap-4 border-t border-slate-800 pt-4">
                 {saveSuccess ? (

@@ -95,7 +95,103 @@ export default function UdhaarLedger({ clients = [], onRecordPayment, onUpdateCr
           </button>
         </div>
 
-        <div className="overflow-x-auto">
+        {/* MOBILE CARD VIEW (No horizontal scrolling required!) */}
+        <div className="block sm:hidden space-y-4">
+          {clients.map(c => {
+            const limit = c.credit_limit || 50000;
+            const bal = c.current_balance || 0;
+            const pct = limit > 0 ? Math.min(100, (bal / limit) * 100) : 0;
+            
+            let barColor = 'bg-emerald-500';
+            if (pct >= 100) barColor = 'bg-rose-500 animate-pulse';
+            else if (pct >= 80) barColor = 'bg-amber-500';
+
+            return (
+              <div key={c.id} className="bg-slate-900/80 p-4 rounded-2xl border border-slate-800 space-y-3 shadow-md">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="font-extrabold text-white text-base flex items-center gap-2">
+                      {c.business_name}
+                      {c.is_order_locked && (
+                        <span className="text-[10px] bg-rose-950 text-rose-400 border border-rose-800 px-2 py-0.5 rounded-md font-bold">
+                          🔒 LOCKED
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-slate-400 font-medium">{c.contact_person} • {c.phone}</div>
+                  </div>
+                  <span className={c.client_type === 'HOTEL' ? 'badge badge-hotel' : 'badge badge-cafe'}>
+                    {c.client_type}
+                  </span>
+                </div>
+
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800/80 flex justify-between items-center">
+                  <div>
+                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Outstanding Udhaar</div>
+                    <div className={`text-xl font-black ${bal > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                      ₹{bal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Max Credit Limit</div>
+                    <div className="flex items-center gap-1 mt-0.5 justify-end">
+                      <span className="text-xs text-slate-400">₹</span>
+                      <input
+                        type="number"
+                        step="1000"
+                        value={editingCreditLimit[c.id] !== undefined ? editingCreditLimit[c.id] : limit}
+                        onChange={e => handleCreditLimitChange(c.id, e.target.value)}
+                        onBlur={() => handleCreditLimitBlur(c)}
+                        className="w-24 text-xs font-bold text-white bg-slate-900 border border-slate-700 px-2 py-1 rounded-lg text-right"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[10px] font-bold">
+                    <span className="text-slate-400">Credit Utilization ({pct.toFixed(0)}% Used)</span>
+                    <span className={pct >= 100 ? 'text-rose-400 font-bold' : 'text-slate-400'}>Limit: ₹{(limit/1000).toFixed(0)}k</span>
+                  </div>
+                  <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden border border-slate-700">
+                    <div className={`h-full ${barColor} transition-all duration-300`} style={{ width: `${pct}%` }}></div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button 
+                    onClick={() => handleOpenPayment(c)}
+                    className="emerald-btn text-xs py-2 px-3 w-full justify-center shadow-lg"
+                  >
+                    💵 Collect Payment
+                  </button>
+
+                  <button 
+                    onClick={() => sendWhatsAppReminder(c)}
+                    className="bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 border border-emerald-500/30 text-xs font-bold py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1 w-full"
+                  >
+                    💬 WhatsApp
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleToggleLock(c)}
+                  className={`w-full text-xs font-bold py-1.5 rounded-xl border transition-all ${
+                    c.is_order_locked
+                      ? 'bg-rose-950/80 border-rose-600 text-rose-300 hover:bg-rose-900'
+                      : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {c.is_order_locked ? '🔒 Unlock Client Ordering' : '🟢 Lock Client Ordering'}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* DESKTOP TABLE VIEW */}
+        <div className="hidden sm:block overflow-x-auto">
           <table>
             <thead>
               <tr>

@@ -169,28 +169,30 @@ export default function Dashboard({ orders, clients, setActiveTab, onGenerateInv
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2 pt-2 border-t border-slate-800/80 sm:border-t-0 sm:pt-0">
                     <span className={o.status === 'PENDING' ? 'badge badge-pending' : 'badge badge-packed'}>
                       {o.status}
                     </span>
                     <div className="text-right">
                       <div className="text-[10px] text-slate-400 font-bold">TOTAL BILL</div>
-                      <div className="text-lg font-black text-emerald-400">₹{(o.actual_final_total || 0).toFixed(2)}</div>
+                      <div className="text-base sm:text-lg font-black text-emerald-400">₹{(o.actual_final_total || 0).toFixed(2)}</div>
                     </div>
-                    <button 
-                      onClick={() => setActiveTab('fulfill')}
-                      className="outline-btn text-xs py-1.5 px-3"
-                    >
-                      ⚖️ Weigh &amp; Pack
-                    </button>
-                    <button 
-                      onClick={() => handlePdfInvoice(o.id)}
-                      disabled={!!invoiceLoading[o.id]}
-                      className="emerald-btn text-xs py-1.5 px-3"
-                      style={{ opacity: invoiceLoading[o.id] ? 0.6 : 1, cursor: invoiceLoading[o.id] ? 'not-allowed' : 'pointer' }}
-                    >
-                      {invoiceLoading[o.id] ? '⏳ Generating...' : '📄 PDF Invoice'}
-                    </button>
+                    <div className="flex items-center gap-1.5 w-full sm:w-auto justify-end pt-1 sm:pt-0">
+                      <button 
+                        onClick={() => setActiveTab('fulfill')}
+                        className="outline-btn text-xs py-1.5 px-2.5 flex-1 sm:flex-none justify-center"
+                      >
+                        ⚖️ Weigh &amp; Pack
+                      </button>
+                      <button 
+                        onClick={() => handlePdfInvoice(o.id)}
+                        disabled={!!invoiceLoading[o.id]}
+                        className="emerald-btn text-xs py-1.5 px-2.5 flex-1 sm:flex-none justify-center"
+                        style={{ opacity: invoiceLoading[o.id] ? 0.6 : 1, cursor: invoiceLoading[o.id] ? 'not-allowed' : 'pointer' }}
+                      >
+                        {invoiceLoading[o.id] ? '⏳ Generating...' : '📄 PDF Invoice'}
+                      </button>
+                    </div>
                   </div>
                 </div>
 

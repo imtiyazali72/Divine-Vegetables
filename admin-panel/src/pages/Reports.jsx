@@ -79,12 +79,12 @@ export default function Reports() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3 w-full md:w-auto">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full sm:w-auto">
           {/* Month Selector Dropdown */}
           <select 
             value={selectedMonth}
             onChange={e => setSelectedMonth(e.target.value)}
-            className="bg-slate-900 text-white font-bold text-xs px-4 py-2.5 rounded-xl border border-slate-700 hover:border-emerald-500 transition-all cursor-pointer"
+            className="bg-slate-900 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl border border-slate-700 hover:border-emerald-500 transition-all cursor-pointer w-full sm:w-auto"
           >
             {monthOptions.map(m => (
               <option key={m.value} value={m.value}>{m.label}</option>
@@ -95,7 +95,7 @@ export default function Reports() {
           <button 
             onClick={handleExportPdf}
             disabled={pdfExporting}
-            className="emerald-btn text-xs py-2.5 px-4 whitespace-nowrap shadow-lg shadow-emerald-950/50"
+            className="emerald-btn text-xs py-2.5 px-4 shadow-lg shadow-emerald-950/50 justify-center w-full sm:w-auto"
           >
             {pdfExporting ? '⏳ Exporting...' : '📄 Export Branded PDF Report'}
           </button>

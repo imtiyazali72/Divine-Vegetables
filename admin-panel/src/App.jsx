@@ -50,36 +50,83 @@ export default function App() {
   // Real-time Cutoff Countdown Seconds Ticking Clock
   const [countdownSecs, setCountdownSecs] = useState(null);
 
+  const audioCtxRef = useRef(null);
+
+  // Global AudioContext Autoplay Unlock on First User Touch / Click
+  useEffect(() => {
+    const unlockAudio = () => {
+      try {
+        if (!audioCtxRef.current) {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (AudioCtx) {
+            audioCtxRef.current = new AudioCtx();
+          }
+        }
+        if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+          audioCtxRef.current.resume();
+        }
+      } catch (e) {}
+    };
+
+    window.addEventListener('click', unlockAudio, { once: false });
+    window.addEventListener('touchstart', unlockAudio, { once: false });
+    return () => {
+      window.removeEventListener('click', unlockAudio);
+      window.removeEventListener('touchstart', unlockAudio);
+    };
+  }, []);
+
   const playOrderSound = () => {
     try {
       if (!soundEnabled) return;
-      const AudioContext = window.AudioContext || window.webkitAudioContext;
-      if (!AudioContext) return;
-      const ctx = new AudioContext();
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new AudioCtx();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') {
+        ctx.resume();
+      }
+      
       const now = ctx.currentTime;
       
+      // Loud crisp 3-tone notification chime for incoming B2B order
       const osc1 = ctx.createOscillator();
       const gain1 = ctx.createGain();
-      osc1.type = 'sine';
-      osc1.frequency.setValueAtTime(659.25, now);
-      gain1.gain.setValueAtTime(0.3, now);
-      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+      osc1.type = 'triangle';
+      osc1.frequency.setValueAtTime(523.25, now);
+      gain1.gain.setValueAtTime(0.5, now);
+      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
       osc1.connect(gain1);
       gain1.connect(ctx.destination);
       osc1.start(now);
-      osc1.stop(now + 0.6);
+      osc1.stop(now + 0.4);
 
       const osc2 = ctx.createOscillator();
       const gain2 = ctx.createGain();
       osc2.type = 'sine';
-      osc2.frequency.setValueAtTime(987.77, now + 0.2);
-      gain2.gain.setValueAtTime(0.4, now + 0.2);
-      gain2.gain.exponentialRampToValueAtTime(0.001, now + 1.2);
+      osc2.frequency.setValueAtTime(659.25, now + 0.15);
+      gain2.gain.setValueAtTime(0.6, now + 0.15);
+      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
       osc2.connect(gain2);
       gain2.connect(ctx.destination);
-      osc2.start(now + 0.2);
-      osc2.stop(now + 1.2);
-    } catch (e) {}
+      osc2.start(now + 0.15);
+      osc2.stop(now + 0.6);
+
+      const osc3 = ctx.createOscillator();
+      const gain3 = ctx.createGain();
+      osc3.type = 'sine';
+      osc3.frequency.setValueAtTime(1046.50, now + 0.35);
+      gain3.gain.setValueAtTime(0.7, now + 0.35);
+      gain3.gain.exponentialRampToValueAtTime(0.001, now + 1.2);
+      osc3.connect(gain3);
+      gain3.connect(ctx.destination);
+      osc3.start(now + 0.35);
+      osc3.stop(now + 1.2);
+    } catch (e) {
+      console.error("Audio play error:", e);
+    }
   };
 
   // Change Password & Security Config Modal State
