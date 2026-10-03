@@ -716,6 +716,12 @@ def place_order(payload: dict, db: Session = Depends(get_db)):
         db.add(order)
         db.flush()
         
+        # High-performance in-memory product dictionary for instant sub-second order placement
+        all_products = db.query(models.Product).all()
+        products_by_id = {p.id: p for p in all_products}
+        products_by_name = {p.name: p for p in all_products}
+        fallback_prod = all_products[0] if all_products else None
+
         estimated_total = 0.0
         for item in items:
             prod_id = item.get("product_id")
@@ -729,13 +735,13 @@ def place_order(payload: dict, db: Session = Depends(get_db)):
             prod = None
             if prod_id:
                 try:
-                    prod = db.query(models.Product).filter(models.Product.id == int(prod_id)).first()
+                    prod = products_by_id.get(int(prod_id))
                 except Exception:
                     pass
             if not prod and prod_name:
-                prod = db.query(models.Product).filter(models.Product.name == str(prod_name)).first()
+                prod = products_by_name.get(str(prod_name))
             if not prod:
-                prod = db.query(models.Product).first()
+                prod = fallback_prod
                 
             if not prod:
                 prod_title = str(prod_name) if prod_name else f"Vegetable Item #{prod_id}"
@@ -749,6 +755,8 @@ def place_order(payload: dict, db: Session = Depends(get_db)):
                 )
                 db.add(prod)
                 db.flush()
+                products_by_id[prod.id] = prod
+                products_by_name[prod.name] = prod
                 
             base_rate = prod.base_rate_hotel if client.client_type == "HOTEL" else prod.base_rate_cafe
             rate = overrides_map.get(prod.id, base_rate)

@@ -59,14 +59,6 @@ export default function Navbar({ activeTab, setActiveTab, viewMode, setViewMode,
             </div>
           </div>
 
-          <button 
-            onClick={() => setViewMode('owner')}
-            className="text-[11px] text-slate-600 hover:text-slate-400 transition-all font-mono"
-            title="Owner Login"
-          >
-            🔒 Owner Access
-          </button>
-
         </div>
       </header>
     );

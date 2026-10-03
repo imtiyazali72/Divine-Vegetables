@@ -136,8 +136,9 @@ export default function App() {
       if (Array.isArray(ordRes)) {
         setOrders(ordRes);
 
-        // Detect new order arrival during auto-polling
-        if (prevOrdersRef.current !== null && ordRes.length > prevOrdersRef.current.length) {
+        // Detect new order arrival during auto-polling (ONLY FOR AUTHENTICATED OWNER ADMIN)
+        const isAuth = sessionStorage.getItem('divine_admin_auth') === 'true';
+        if (isAuth && prevOrdersRef.current !== null && ordRes.length > prevOrdersRef.current.length) {
           const newestOrder = ordRes[0];
           if (newestOrder) {
             playOrderSound();
@@ -481,14 +482,16 @@ export default function App() {
           setViewMode={handleSwitchToOwner}
           cutoffInfo={cutoffInfo}
           onChangePasswordClick={() => setShowPasswordModal(true)}
+          soundEnabled={soundEnabled}
+          onToggleSound={() => setSoundEnabled(!soundEnabled)}
         />
       )}
 
       {/* MAIN CONTENT AREA */}
       <div className={viewMode === 'owner' && isAdminAuthenticated ? "md:pl-64 flex-1 flex flex-col min-h-screen transition-all relative z-10" : "flex-1 flex flex-col min-h-screen transition-all relative z-10"}>
         
-        {/* Floating Real-time Order Notification Toast Popup */}
-        {newOrderToast && (
+        {/* Floating Real-time Order Notification Toast Popup (ONLY FOR OWNER ADMIN) */}
+        {viewMode === 'owner' && isAdminAuthenticated && newOrderToast && (
           <div className="fixed top-5 right-5 z-50 bg-slate-900 border-2 border-emerald-500 text-white p-4 rounded-2xl shadow-2xl animate-bounce flex items-center gap-4 max-w-sm">
             <div className="w-12 h-12 rounded-xl bg-emerald-500/20 border border-emerald-400 flex items-center justify-center text-2xl shrink-0">
               🔔
@@ -532,19 +535,6 @@ export default function App() {
               </div>
 
               <div className="flex items-center justify-center sm:justify-end gap-2 flex-wrap w-full sm:w-auto">
-                {/* Audio Notification Sound Toggle */}
-                <button
-                  onClick={() => setSoundEnabled(!soundEnabled)}
-                  title={soundEnabled ? "Order Alert Sound Active" : "Order Sound Muted"}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all border shrink-0 ${
-                    soundEnabled 
-                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 hover:bg-emerald-500/30' 
-                      : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'
-                  }`}
-                >
-                  {soundEnabled ? '🔔 Sound ON' : '🔕 Muted'}
-                </button>
-
                 {/* Live Cutoff Countdown Timer */}
                 <span className={`text-[11px] px-2.5 py-1 rounded-lg font-semibold border flex items-center gap-1.5 shrink-0 ${
                   countdownSecs !== null && countdownSecs < 1800 

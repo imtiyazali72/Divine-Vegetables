@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-export default function Sidebar({ activeTab, setActiveTab, viewMode, setViewMode, cutoffInfo, onChangePasswordClick }) {
+export default function Sidebar({ activeTab, setActiveTab, viewMode, setViewMode, cutoffInfo, onChangePasswordClick, soundEnabled, onToggleSound }) {
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
 
   const navItems = [
@@ -62,8 +62,22 @@ export default function Sidebar({ activeTab, setActiveTab, viewMode, setViewMode
 
           {/* Hairline Divider & Utility Actions */}
           <div className="border-t border-white/10 pt-4 space-y-1.5">
-            <div className="text-[10px] font-bold text-slate-400/80 uppercase tracking-widest px-3 mb-1">Portals &amp; Security</div>
+            <div className="text-[10px] font-bold text-slate-400/80 uppercase tracking-widest px-3 mb-1">Portals &amp; Sound</div>
             
+            {onToggleSound && (
+              <button
+                onClick={onToggleSound}
+                className={`w-full flex items-center gap-3 px-3.5 py-2 text-xs font-bold rounded-2xl transition-all duration-200 text-left border ${
+                  soundEnabled 
+                    ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' 
+                    : 'text-slate-400 bg-slate-800/40 border-slate-700/50'
+                }`}
+              >
+                <span>{soundEnabled ? '🔔' : '🔕'}</span>
+                <span>{soundEnabled ? 'Order Sound: ON' : 'Order Sound: MUTED'}</span>
+              </button>
+            )}
+
             <button
               onClick={() => setViewMode('client')}
               className="w-full flex items-center gap-3 px-3.5 py-2 text-xs font-bold text-blue-400 hover:text-blue-300 hover:bg-white/[0.07] hover:backdrop-blur-md rounded-2xl transition-all duration-200 text-left border border-transparent"
@@ -120,9 +134,19 @@ export default function Sidebar({ activeTab, setActiveTab, viewMode, setViewMode
           <span className="font-black text-white text-sm tracking-tight">DIVINE VEGETABLES</span>
         </div>
 
-        <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-400/30 px-2.5 py-0.5 rounded-full font-bold">
-          ADMIN
-        </span>
+        <div className="flex items-center gap-2">
+          {onToggleSound && (
+            <button 
+              onClick={onToggleSound} 
+              className="text-xs px-2 py-1 bg-slate-800 text-emerald-400 border border-emerald-500/40 rounded-lg"
+            >
+              {soundEnabled ? '🔔' : '🔕'}
+            </button>
+          )}
+          <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-400/30 px-2.5 py-0.5 rounded-full font-bold">
+            ADMIN
+          </span>
+        </div>
       </div>
 
       {/* MOBILE SLIDE-OVER DRAWER (LIQUID GLASS) */}
@@ -156,6 +180,15 @@ export default function Sidebar({ activeTab, setActiveTab, viewMode, setViewMode
               </nav>
 
               <div className="border-t border-white/10 pt-3 space-y-1.5">
+                {onToggleSound && (
+                  <button
+                    onClick={() => { onToggleSound(); setMobileDrawerOpen(false); }}
+                    className="w-full flex items-center gap-2.5 text-xs font-bold text-emerald-400 hover:bg-emerald-500/15 py-2 px-3 rounded-2xl text-left"
+                  >
+                    <span>{soundEnabled ? '🔔' : '🔕'}</span>
+                    <span>{soundEnabled ? 'Order Sound: ON' : 'Order Sound: MUTED'}</span>
+                  </button>
+                )}
                 <button
                   onClick={() => { setViewMode('client'); setMobileDrawerOpen(false); }}
                   className="w-full flex items-center gap-2.5 text-xs font-bold text-blue-400 hover:bg-blue-500/15 py-2 px-3 rounded-2xl text-left"
