@@ -19,7 +19,7 @@ export const getApiBaseUrl = () => {
 
 export const API_BASE = getApiBaseUrl();
 
-// Multi-endpoint fetch fallback (Production URL -> Vite Proxy -> IPv4 127.0.0.1 -> localhost)
+// Fast-path network fetch utility with zero-delay fallback
 export const smartFetch = async (endpointPath, options = {}) => {
   let cleanPath = endpointPath.startsWith('/') ? endpointPath : `/${endpointPath}`;
   
@@ -30,26 +30,40 @@ export const smartFetch = async (endpointPath, options = {}) => {
     cleanPath = '';
   }
   
-  const candidateUrls = [
-    `${API_BASE}${cleanPath}`,
-    `/api${cleanPath}`,
-    `http://127.0.0.1:8000/api${cleanPath}`,
-    `http://localhost:8000/api${cleanPath}`
-  ];
+  const primaryUrl = `${API_BASE}${cleanPath}`;
   
-  const uniqueUrls = Array.from(new Set(candidateUrls));
-  
-  let lastErr = null;
-  for (const url of uniqueUrls) {
-    try {
-      const res = await fetch(url, options);
-      if (res.ok || res.status < 500) {
-        return res;
-      }
-    } catch (err) {
-      lastErr = err;
+  // 1. Instant execution on primary configured API endpoint
+  try {
+    const res = await fetch(primaryUrl, options);
+    if (res.ok || res.status < 500) {
+      return res;
+    }
+  } catch (err) {
+    // Primary URL error fallback
+  }
+
+  // 2. Only attempt local dev ports if running on localhost environment
+  const isLocalhost = typeof window !== 'undefined' && (
+    window.location.hostname === 'localhost' || 
+    window.location.hostname === '127.0.0.1'
+  );
+
+  if (isLocalhost) {
+    const devCandidates = [
+      `/api${cleanPath}`,
+      `http://127.0.0.1:8000/api${cleanPath}`,
+      `http://localhost:8000/api${cleanPath}`
+    ];
+    for (const devUrl of devCandidates) {
+      if (devUrl === primaryUrl) continue;
+      try {
+        const devRes = await fetch(devUrl, options);
+        if (devRes.ok || devRes.status < 500) {
+          return devRes;
+        }
+      } catch (e) {}
     }
   }
   
-  throw lastErr || new Error("Backend server is unreachable.");
+  throw new Error("Backend server is unreachable. Please try again.");
 };

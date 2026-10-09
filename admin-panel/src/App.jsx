@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import Sidebar from './components/Sidebar';
 import MobileBottomNav from './components/MobileBottomNav';
 import Dashboard from './pages/Dashboard';
@@ -43,16 +44,21 @@ export default function App() {
   const [clients, setClients] = useState([]);
 
   // Real-time Order Audio Chime & Notification Toast state
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [soundMode, setSoundMode] = useState(() => localStorage.getItem('divine_sound_mode') || 'continuous');
   const [newOrderToast, setNewOrderToast] = useState(null);
   const prevOrdersRef = useRef(null);
+
+  const handleSetSoundMode = (mode) => {
+    setSoundMode(mode);
+    localStorage.setItem('divine_sound_mode', mode);
+  };
 
   // Real-time Cutoff Countdown Seconds Ticking Clock
   const [countdownSecs, setCountdownSecs] = useState(null);
 
   const audioCtxRef = useRef(null);
 
-  // Global AudioContext Autoplay Unlock on First User Touch / Click
+  // Global AudioContext Autoplay Unlock on First User Touch / Click / Pointerdown
   useEffect(() => {
     const unlockAudio = () => {
       try {
@@ -62,23 +68,37 @@ export default function App() {
             audioCtxRef.current = new AudioCtx();
           }
         }
-        if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
-          audioCtxRef.current.resume();
+        if (audioCtxRef.current) {
+          if (audioCtxRef.current.state === 'suspended') {
+            audioCtxRef.current.resume();
+          }
+          // Silent micro-tone to force mobile hardware unlock
+          const osc = audioCtxRef.current.createOscillator();
+          const gain = audioCtxRef.current.createGain();
+          gain.gain.setValueAtTime(0.0001, audioCtxRef.current.currentTime);
+          osc.connect(gain);
+          gain.connect(audioCtxRef.current.destination);
+          osc.start();
+          osc.stop(audioCtxRef.current.currentTime + 0.01);
         }
       } catch (e) {}
     };
 
-    window.addEventListener('click', unlockAudio, { once: false });
-    window.addEventListener('touchstart', unlockAudio, { once: false });
+    window.addEventListener('click', unlockAudio);
+    window.addEventListener('touchstart', unlockAudio);
+    window.addEventListener('touchend', unlockAudio);
+    window.addEventListener('pointerdown', unlockAudio);
     return () => {
       window.removeEventListener('click', unlockAudio);
       window.removeEventListener('touchstart', unlockAudio);
+      window.removeEventListener('touchend', unlockAudio);
+      window.removeEventListener('pointerdown', unlockAudio);
     };
   }, []);
 
-  const playOrderSound = () => {
+  const playOrderSound = (forcePlay = false) => {
     try {
-      if (!soundEnabled) return;
+      if (!forcePlay && soundMode === 'muted') return;
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return;
       if (!audioCtxRef.current) {
@@ -89,45 +109,82 @@ export default function App() {
         ctx.resume();
       }
       
-      const now = ctx.currentTime;
-      
-      // Loud crisp 3-tone notification chime for incoming B2B order
-      const osc1 = ctx.createOscillator();
-      const gain1 = ctx.createGain();
-      osc1.type = 'triangle';
-      osc1.frequency.setValueAtTime(523.25, now);
-      gain1.gain.setValueAtTime(0.5, now);
-      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
-      osc1.connect(gain1);
-      gain1.connect(ctx.destination);
-      osc1.start(now);
-      osc1.stop(now + 0.4);
+      const startTime = ctx.currentTime + 0.03;
 
-      const osc2 = ctx.createOscillator();
-      const gain2 = ctx.createGain();
-      osc2.type = 'sine';
-      osc2.frequency.setValueAtTime(659.25, now + 0.15);
-      gain2.gain.setValueAtTime(0.6, now + 0.15);
-      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
-      osc2.connect(gain2);
-      gain2.connect(ctx.destination);
-      osc2.start(now + 0.15);
-      osc2.stop(now + 0.6);
+      // Loud 3-tone POS order alarm chime for phone speakers
+      const playChimeBurst = (timeOffset) => {
+        const t = startTime + timeOffset;
 
-      const osc3 = ctx.createOscillator();
-      const gain3 = ctx.createGain();
-      osc3.type = 'sine';
-      osc3.frequency.setValueAtTime(1046.50, now + 0.35);
-      gain3.gain.setValueAtTime(0.7, now + 0.35);
-      gain3.gain.exponentialRampToValueAtTime(0.001, now + 1.2);
-      osc3.connect(gain3);
-      gain3.connect(ctx.destination);
-      osc3.start(now + 0.35);
-      osc3.stop(now + 1.2);
+        // Tone 1: Square wave for high penetration on small speakers (A5: 880Hz)
+        const osc1 = ctx.createOscillator();
+        const gain1 = ctx.createGain();
+        osc1.type = 'square';
+        osc1.frequency.setValueAtTime(880, t);
+        gain1.gain.setValueAtTime(0.35, t);
+        gain1.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+        osc1.connect(gain1);
+        gain1.connect(ctx.destination);
+        osc1.start(t);
+        osc1.stop(t + 0.15);
+
+        // Tone 2: E6 (1318.5Hz)
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.type = 'sine';
+        osc2.frequency.setValueAtTime(1318.5, t + 0.08);
+        gain2.gain.setValueAtTime(0.65, t + 0.08);
+        gain2.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+        osc2.connect(gain2);
+        gain2.connect(ctx.destination);
+        osc2.start(t + 0.08);
+        osc2.stop(t + 0.28);
+
+        // Tone 3: High bell pitch A6 (1760Hz)
+        const osc3 = ctx.createOscillator();
+        const gain3 = ctx.createGain();
+        osc3.type = 'sine';
+        osc3.frequency.setValueAtTime(1760, t + 0.18);
+        gain3.gain.setValueAtTime(0.75, t + 0.18);
+        gain3.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+        osc3.connect(gain3);
+        gain3.connect(ctx.destination);
+        osc3.start(t + 0.18);
+        osc3.stop(t + 0.45);
+      };
+
+      if ((soundMode === 'once' || forcePlay) && !newOrderToast) {
+        // Play 5 chime bursts over 3.5 seconds
+        playChimeBurst(0);
+        playChimeBurst(0.65);
+        playChimeBurst(1.3);
+        playChimeBurst(1.95);
+        playChimeBurst(2.6);
+      } else {
+        // Play 2 chime bursts per loop cycle
+        playChimeBurst(0);
+        playChimeBurst(0.5);
+      }
     } catch (e) {
       console.error("Audio play error:", e);
     }
   };
+
+  // CONTINUOUS ORDER ALERT RING LOOP (rings every 1.8s until owner views or dismisses order)
+  useEffect(() => {
+    if (!newOrderToast || soundMode !== 'continuous' || viewMode !== 'owner' || !isAdminAuthenticated) {
+      return;
+    }
+
+    // Play immediate burst
+    playOrderSound(true);
+
+    // Loop chime sound every 1.8 seconds (1-2 sec gap) until toast is cleared
+    const ringInterval = setInterval(() => {
+      playOrderSound(true);
+    }, 1800);
+
+    return () => clearInterval(ringInterval);
+  }, [newOrderToast, soundMode, viewMode, isAdminAuthenticated]);
 
   // Change Password & Security Config Modal State
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -137,6 +194,68 @@ export default function App() {
   const [secQuestion, setSecQuestion] = useState('What is your favorite city?');
   const [secAnswer, setSecAnswer] = useState('');
   const [settingsSubmitting, setSettingsSubmitting] = useState(false);
+
+  // Backup & Restore State & Handlers
+  const [showBackupModal, setShowBackupModal] = useState(false);
+  const [backupLoading, setBackupLoading] = useState(false);
+
+  const handleDownloadBackup = async () => {
+    setBackupLoading(true);
+    try {
+      const res = await smartFetch('/admin/backup');
+      if (!res.ok) throw new Error('Backup fetch failed');
+      const data = await res.json();
+      const jsonStr = JSON.stringify(data, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().split('T')[0];
+      a.href = url;
+      a.download = `divine_vegetables_backup_${dateStr}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      alert('✅ Database Backup JSON exported & downloaded successfully!');
+    } catch (err) {
+      alert(`⚠️ Backup failed: ${err.message}`);
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const handleRestoreBackup = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!window.confirm('⚠️ WARNING: Restoring backup will overwrite current database records! Do you want to proceed?')) {
+      e.target.value = '';
+      return;
+    }
+
+    setBackupLoading(true);
+    try {
+      const text = await file.text();
+      const backupData = JSON.parse(text);
+      const res = await smartFetch('/admin/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(backupData)
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'success') {
+        alert(`🎉 ${data.message || 'Database restored successfully!'}`);
+        fetchData();
+        setShowBackupModal(false);
+      } else {
+        alert(`⚠️ Restore failed: ${data.detail || 'Invalid backup data structure'}`);
+      }
+    } catch (err) {
+      alert(`⚠️ Restore error: ${err.message}`);
+    } finally {
+      setBackupLoading(false);
+      e.target.value = '';
+    }
+  };
 
   // Sync route and Hash to enforce admin protection
   useEffect(() => {
@@ -188,13 +307,15 @@ export default function App() {
         if (isAuth && prevOrdersRef.current !== null && ordRes.length > prevOrdersRef.current.length) {
           const newestOrder = ordRes[0];
           if (newestOrder) {
-            playOrderSound();
             const clientName = newestOrder.client?.business_name || "B2B Hotel Client";
             setNewOrderToast({
               clientName: clientName,
               orderNumber: newestOrder.order_number,
               amount: newestOrder.estimated_total
             });
+            if (soundMode === 'once') {
+              playOrderSound(true);
+            }
           }
         }
         prevOrdersRef.current = ordRes;
@@ -520,6 +641,43 @@ export default function App() {
       <div className="fixed top-1/4 left-10 w-96 h-96 bg-teal-500/10 rounded-full blur-3xl pointer-events-none z-0"></div>
       <div className="fixed bottom-10 right-10 w-[500px] h-[500px] bg-emerald-600/10 rounded-full blur-3xl pointer-events-none z-0"></div>
       
+      {/* FLOATING REAL-TIME ORDER NOTIFICATION TOAST POPUP (OWNER ADMIN ONLY - STABLE BOTTOM DOCK PORTAL) */}
+      {viewMode === 'owner' && isAdminAuthenticated && newOrderToast && createPortal(
+        <div 
+          className="fixed inset-x-3 bottom-[80px] md:bottom-6 md:right-6 md:top-auto md:left-auto md:max-w-md bg-slate-900/95 border-2 border-emerald-500 text-white p-3.5 sm:p-4 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] backdrop-blur-2xl flex items-center justify-between gap-3 transition-all duration-300"
+          style={{ zIndex: 999999, position: 'fixed', bottom: '80px' }}
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-emerald-500/20 border border-emerald-400 flex items-center justify-center text-xl sm:text-2xl shrink-0">
+              🔔
+            </div>
+            <div className="min-w-0">
+              <div className="text-[10px] font-extrabold text-emerald-400 uppercase tracking-wider truncate flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block"></span>
+                NEW B2B ORDER RECEIVED!
+              </div>
+              <h4 className="text-xs sm:text-sm font-black text-white truncate">{newOrderToast.clientName}</h4>
+              <p className="text-[11px] text-slate-300 font-mono truncate">Order #{newOrderToast.orderNumber} • ₹{newOrderToast.amount?.toFixed(2)}</p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5 shrink-0">
+            <button 
+              onClick={() => { setActiveTab('fulfill'); setViewMode('owner'); setNewOrderToast(null); }}
+              className="text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 active:scale-95 px-3.5 py-2 rounded-xl text-white whitespace-nowrap shadow-lg shadow-emerald-950/60 flex items-center gap-1"
+            >
+              <span>👁️ View</span>
+            </button>
+            <button 
+              onClick={() => setNewOrderToast(null)}
+              className="text-[10px] text-slate-400 hover:text-white text-center font-bold"
+            >
+              Dismiss ✕
+            </button>
+          </div>
+        </div>,
+        document.body
+      )}
+
       {/* SIDEBAR NAVIGATION (DESKTOP VERTICAL STICKY + MOBILE DRAWER) - ONLY WHEN AUTHENTICATED */}
       {viewMode === 'owner' && isAdminAuthenticated && (
         <Sidebar 
@@ -529,41 +687,15 @@ export default function App() {
           setViewMode={handleSwitchToOwner}
           cutoffInfo={cutoffInfo}
           onChangePasswordClick={() => setShowPasswordModal(true)}
-          soundEnabled={soundEnabled}
-          onToggleSound={() => setSoundEnabled(!soundEnabled)}
+          onBackupClick={() => setShowBackupModal(true)}
+          soundMode={soundMode}
+          onSetSoundMode={handleSetSoundMode}
+          onTestSound={playOrderSound}
         />
       )}
 
       {/* MAIN CONTENT AREA */}
       <div className={viewMode === 'owner' && isAdminAuthenticated ? "md:pl-64 flex-1 flex flex-col min-h-screen transition-all relative z-10" : "flex-1 flex flex-col min-h-screen transition-all relative z-10"}>
-        
-        {/* Floating Real-time Order Notification Toast Popup (ONLY FOR OWNER ADMIN) */}
-        {viewMode === 'owner' && isAdminAuthenticated && newOrderToast && (
-          <div className="fixed top-5 right-5 z-50 bg-slate-900 border-2 border-emerald-500 text-white p-4 rounded-2xl shadow-2xl animate-bounce flex items-center gap-4 max-w-sm">
-            <div className="w-12 h-12 rounded-xl bg-emerald-500/20 border border-emerald-400 flex items-center justify-center text-2xl shrink-0">
-              🔔
-            </div>
-            <div>
-              <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">NEW B2B ORDER RECEIVED!</div>
-              <h4 className="text-sm font-extrabold text-white">{newOrderToast.clientName}</h4>
-              <p className="text-[11px] text-slate-300 font-mono">Order #{newOrderToast.orderNumber} • ₹{newOrderToast.amount?.toFixed(2)}</p>
-            </div>
-            <div className="flex flex-col gap-1 shrink-0">
-              <button 
-                onClick={() => { setActiveTab('fulfill'); setViewMode('owner'); setNewOrderToast(null); }}
-                className="text-[10px] font-bold bg-emerald-600 hover:bg-emerald-500 px-2.5 py-1 rounded-lg text-white whitespace-nowrap"
-              >
-                View Order
-              </button>
-              <button 
-                onClick={() => setNewOrderToast(null)}
-                className="text-[10px] text-slate-400 hover:text-white"
-              >
-                Dismiss
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* Public B2B Top Header Banner for Client Mode */}
         {viewMode === 'client' && (
@@ -1005,6 +1137,74 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ADMIN BACKUP & RESTORE MODAL */}
+      {showBackupModal && (
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 z-50">
+          <div className="glass-panel p-6 max-w-md w-full border border-teal-500/50 space-y-5 shadow-2xl">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                💾 Admin Backup &amp; Atomic Restore
+              </h3>
+              <button onClick={() => setShowBackupModal(false)} className="text-slate-400 hover:text-white font-bold text-lg">✕</button>
+            </div>
+
+            <p className="text-xs text-slate-300">
+              Export complete database records (Clients, Products, Rates, Orders, Ledger, Expenses, Notifications) as a JSON file or restore from a previous JSON backup.
+            </p>
+
+            <div className="space-y-4 pt-2">
+              {/* Export Backup Card */}
+              <div className="bg-slate-900/90 border border-emerald-500/30 p-4 rounded-xl space-y-2">
+                <div className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                  <span>📥 Export Complete Database</span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Download a full snapshot of all products, clients, ledger balances, expenses, and order history as a backup JSON file.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleDownloadBackup}
+                  disabled={backupLoading}
+                  className="emerald-btn text-xs w-full justify-center py-2.5 mt-2 font-bold"
+                >
+                  {backupLoading ? 'Exporting...' : '💾 Export Backup JSON File'}
+                </button>
+              </div>
+
+              {/* Restore Backup Card */}
+              <div className="bg-slate-900/90 border border-amber-500/30 p-4 rounded-xl space-y-2">
+                <div className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                  <span>📤 Atomic Restore Database</span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Upload a previously exported JSON backup file to atomically restore all records into the database.
+                </p>
+                <label className="outline-btn text-xs w-full justify-center py-2.5 mt-2 font-bold cursor-pointer text-amber-300 border-amber-500/40 hover:bg-amber-500/10 block text-center">
+                  {backupLoading ? 'Restoring...' : '📁 Select JSON File to Restore'}
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={handleRestoreBackup}
+                    disabled={backupLoading}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-end border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowBackupModal(false)}
+                className="outline-btn text-xs py-2 px-5"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

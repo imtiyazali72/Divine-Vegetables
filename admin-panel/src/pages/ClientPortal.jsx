@@ -16,7 +16,6 @@ const DEFAULT_PRODUCTS = [
 
 export default function ClientPortal({ clients, products, cutoffInfo, onPlaceOrder, activeSubTab = 'catalog', setActiveSubTab, apiBase }) {
   const BASE_URL = apiBase || DEFAULT_API_BASE;
-  const displayProducts = (Array.isArray(products) && products.length > 0) ? products : DEFAULT_PRODUCTS;
 
   const [currentUser, setCurrentUser] = useState(() => {
     try {
@@ -68,7 +67,13 @@ export default function ClientPortal({ clients, products, cutoffInfo, onPlaceOrd
   const [deliveryDate, setDeliveryDate] = useState(getTomorrowStr());
   const [kitchenNotes, setKitchenNotes] = useState('');
   const [clientOrders, setClientOrders] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [clientProducts, setClientProducts] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const displayProducts = (clientProducts && clientProducts.length > 0) 
+    ? clientProducts 
+    : ((Array.isArray(products) && products.length > 0) ? products : DEFAULT_PRODUCTS);
 
   useEffect(() => {
     if (currentUser) {
@@ -89,10 +94,44 @@ export default function ClientPortal({ clients, products, cutoffInfo, onPlaceOrd
     }
   };
 
+  const fetchNotifications = async (clientId) => {
+    if (!clientId) return;
+    try {
+      const res = await smartFetch(`/notifications?client_id=${clientId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setNotifications(data);
+      }
+    } catch (e) {}
+  };
+
+  const fetchClientProducts = async (clientId) => {
+    if (!clientId) return;
+    try {
+      const res = await smartFetch(`/products?client_id=${clientId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setClientProducts(data);
+      }
+    } catch (e) {}
+  };
+
+  const handleMarkNotificationRead = async (notifId) => {
+    try {
+      await smartFetch(`/notifications/${notifId}/read`, { method: 'POST' });
+      if (currentUser?.client?.id) fetchNotifications(currentUser.client.id);
+    } catch (e) {}
+  };
+
   useEffect(() => {
     if (currentUser?.client?.id) {
       fetchClientOrders(currentUser.client.id);
-      const interval = setInterval(() => fetchClientOrders(currentUser.client.id), 4000);
+      fetchNotifications(currentUser.client.id);
+      fetchClientProducts(currentUser.client.id);
+      const interval = setInterval(() => {
+        fetchClientOrders(currentUser.client.id);
+        fetchNotifications(currentUser.client.id);
+      }, 4000);
       return () => clearInterval(interval);
     }
   }, [currentUser, BASE_URL]);
@@ -440,6 +479,30 @@ export default function ClientPortal({ clients, products, cutoffInfo, onPlaceOrd
           </div>
         </div>
       ) : null}
+
+      {/* In-App Notifications Banner (Free Payment Receipts & Alerts) */}
+      {notifications.length > 0 && notifications.some(n => !n.is_read) && (
+        <div className="space-y-2">
+          {notifications.filter(n => !n.is_read).map(n => (
+            <div key={n.id} className="bg-emerald-950/80 border border-emerald-500/50 p-3.5 rounded-2xl flex items-center justify-between gap-3 text-xs text-white shadow-lg backdrop-blur-md">
+              <div className="flex items-center gap-3">
+                <span className="text-xl">🔔</span>
+                <div>
+                  <div className="font-extrabold text-emerald-300">{n.title}</div>
+                  <div className="text-slate-300">{n.message}</div>
+                  <div className="text-[10px] text-slate-400 font-mono mt-0.5">{n.created_at}</div>
+                </div>
+              </div>
+              <button
+                onClick={() => handleMarkNotificationRead(n.id)}
+                className="text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-xl shrink-0"
+              >
+                Mark Read ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Sub Tabs Navigation */}
       <div className="flex gap-2 border-b border-slate-800 pb-2">

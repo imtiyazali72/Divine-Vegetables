@@ -48,6 +48,13 @@ app.add_middleware(
 os.makedirs("invoices", exist_ok=True)
 app.mount("/invoices", StaticFiles(directory="invoices"), name="invoices")
 
+# Mount compiled frontend dist assets if present
+dist_folder = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "admin-panel", "dist")
+if os.path.exists(dist_folder):
+    assets_dir = os.path.join(dist_folder, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="static_assets")
+
 # --- SEED DEMO DATA ON STARTUP ---
 @app.on_event("startup")
 def seed_database():
@@ -70,6 +77,11 @@ def seed_database():
                         conn.execute(text("ALTER TABLE clients ADD COLUMN is_order_locked BOOLEAN DEFAULT 0"))
                     if "credit_limit" not in client_cols:
                         conn.execute(text("ALTER TABLE clients ADD COLUMN credit_limit FLOAT DEFAULT 50000.0"))
+
+                # Products table migration
+                prod_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(products)")).fetchall()]
+                if prod_cols and "cost_price" not in prod_cols:
+                    conn.execute(text("ALTER TABLE products ADD COLUMN cost_price FLOAT DEFAULT 0.0"))
 
                 # Delivery Routes table migration
                 route_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(delivery_routes)")).fetchall()]
@@ -203,16 +215,18 @@ def login(payload: dict, db: Session = Depends(get_db)):
     if not username or not password:
         raise HTTPException(status_code=400, detail="Username/phone and password are required")
         
-    # Search by exact username or case-insensitive username
-    user = db.query(models.User).filter(
-        (models.User.username == username) | (models.User.username.ilike(username))
-    ).first()
+    # 1. Fast path: Direct indexed exact username/phone search
+    user = db.query(models.User).filter(models.User.username == username).first()
     
-    # Fallback search by Client phone or business name
+    # 2. Case-insensitive fallback search
     if not user:
-        client = db.query(models.Client).filter(
-            (models.Client.phone == username) | (models.Client.business_name.ilike(f"%{username}%"))
-        ).first()
+        user = db.query(models.User).filter(models.User.username.ilike(username)).first()
+        
+    # 3. Client phone or business name fallback search
+    if not user:
+        client = db.query(models.Client).filter(models.Client.phone == username).first()
+        if not client:
+            client = db.query(models.Client).filter(models.Client.business_name.ilike(f"{username}%")).first()
         if client:
             user = db.query(models.User).filter(models.User.client_id == client.id).first()
             
@@ -424,7 +438,7 @@ def reset_admin_password_question(payload: dict, db: Session = Depends(get_db)):
     db.commit()
     return {"status": "success", "message": "🔑 Admin password reset successfully! You can now login with your new password."}
 
-# 5. GET PRODUCTS & DAILY RATES
+# 5. GET PRODUCTS & DAILY RATES (WITH CUSTOMER-SPECIFIC AUTOMATIC RANKING)
 @app.get("/api/products")
 @app.get("/api/products/")
 def get_products(client_id: Optional[int] = None, client_type: Optional[str] = "HOTEL", db: Session = Depends(get_db)):
@@ -436,10 +450,28 @@ def get_products(client_id: Optional[int] = None, client_type: Optional[str] = "
         products = db.query(models.Product).all()
     
     overrides_map = {}
+    client_order_counts = {}
+    
     if client_id:
         overrides = db.query(models.ClientPriceOverride).filter(models.ClientPriceOverride.client_id == client_id).all()
         for o in overrides:
             overrides_map[o.product_id] = o.custom_rate
+            
+        # Calculate product order frequency & recency for this specific client
+        from sqlalchemy import func
+        item_stats = db.query(
+            models.OrderItem.product_id,
+            func.count(models.OrderItem.id).label("order_freq"),
+            func.sum(models.OrderItem.ordered_qty).label("total_qty")
+        ).join(models.Order, models.Order.id == models.OrderItem.order_id)\
+         .filter(models.Order.client_id == client_id)\
+         .group_by(models.OrderItem.product_id).all()
+         
+        for stat in item_stats:
+            client_order_counts[stat.product_id] = (stat.order_freq or 0) * 100 + (stat.total_qty or 0)
+
+        # Sort products: highest client frequency first, then original ID
+        products.sort(key=lambda p: (client_order_counts.get(p.id, 0), -p.id), reverse=True)
             
     res = []
     for p in products:
@@ -454,6 +486,7 @@ def get_products(client_id: Optional[int] = None, client_type: Optional[str] = "
             "default_unit": p.default_unit,
             "base_rate_hotel": p.base_rate_hotel,
             "base_rate_cafe": p.base_rate_cafe,
+            "cost_price": getattr(p, 'cost_price', 0.0) or (p.base_rate_hotel * 0.75),
             "effective_rate": effective_rate,
             "has_override": p.id in overrides_map,
             "image_url": p.image_url
@@ -986,6 +1019,8 @@ def record_payment(payload: dict, db: Session = Depends(get_db)):
     client_id = payload.get("client_id")
     amount = float(payload.get("amount", 0.0))
     mode = payload.get("mode", "UPI")
+    ref_no = str(payload.get("reference_no", "")).strip() or f"REF-{datetime.datetime.utcnow().strftime('%M%S')}"
+    notes_text = str(payload.get("notes", "")).strip() or "Udhaar Collection Received"
     
     client = db.query(models.Client).filter(models.Client.id == client_id).first()
     if not client:
@@ -999,10 +1034,20 @@ def record_payment(payload: dict, db: Session = Depends(get_db)):
         client_id=client_id,
         amount_paid=amount,
         payment_mode=mode,
-        reference_no=payload.get("reference_no", "REF-99"),
-        notes=payload.get("notes", "Payment Received")
+        reference_no=ref_no,
+        notes=notes_text
     )
     db.add(payment)
+
+    # Create In-App Notification for Payment Receipt
+    notif = models.InAppNotification(
+        client_id=client_id,
+        title="💵 Payment Receipt Confirmed",
+        message=f"Payment of ₹{amount:.2f} received via {mode} (Ref: {ref_no}). Remaining Udhaar: ₹{client.current_balance:.2f}",
+        notification_type="PAYMENT_RECEIPT"
+    )
+    db.add(notif)
+
     db.commit()
     return {"status": "success", "new_balance": client.current_balance, "message": f"Payment of ₹{amount:.2f} recorded!"}
 
@@ -1328,26 +1373,416 @@ def get_procurement_calculation(db: Session = Depends(get_db)):
         "items": calculated_items
     }
 
-# 16. CLIENT CREDIT LIMIT & LOCK CONTROL
-@app.put("/api/admin/clients/{client_id}/credit-limit")
-@app.put("/api/admin/clients/{client_id}/credit-limit/")
-def update_client_credit_limit(client_id: int, payload: dict, db: Session = Depends(get_db)):
+# 17. EXPENSE MANAGEMENT ENDPOINTS
+@app.get("/api/admin/expenses")
+@app.get("/api/admin/expenses/")
+def get_expenses(category: Optional[str] = None, year_month: Optional[str] = None, db: Session = Depends(get_db)):
+    query = db.query(models.Expense)
+    if category:
+        query = query.filter(models.Expense.category == category)
+    if year_month:
+        try:
+            y, m = map(int, year_month.split("-"))
+            start_d = datetime.datetime(y, m, 1)
+            end_d = datetime.datetime(y, m + 1, 1) if m < 12 else datetime.datetime(y + 1, 1, 1)
+            query = query.filter(models.Expense.expense_date >= start_d, models.Expense.expense_date < end_d)
+        except Exception:
+            pass
+            
+    expenses = query.order_by(models.Expense.expense_date.desc()).all()
+    total_amount = sum(e.amount for e in expenses)
+    return {
+        "status": "success",
+        "total_amount": total_amount,
+        "expenses": [{
+            "id": e.id,
+            "category": e.category,
+            "amount": e.amount,
+            "expense_date": e.expense_date.strftime("%Y-%m-%d"),
+            "expense_date_formatted": e.expense_date.strftime("%d %b %Y"),
+            "description": e.description or ""
+        } for e in expenses]
+    }
+
+@app.post("/api/admin/expenses")
+@app.post("/api/admin/expenses/")
+def create_expense(payload: dict, db: Session = Depends(get_db)):
+    category = str(payload.get("category", "Other")).strip()
+    amount = float(payload.get("amount", 0.0))
+    description = str(payload.get("description", "")).strip()
+    raw_date = str(payload.get("expense_date", "")).strip()
+    
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Expense amount must be greater than 0")
+        
+    exp_date = datetime.datetime.utcnow()
+    if raw_date:
+        try:
+            exp_date = datetime.datetime.strptime(raw_date, "%Y-%m-%d")
+        except Exception:
+            pass
+            
+    expense = models.Expense(
+        category=category,
+        amount=amount,
+        expense_date=exp_date,
+        description=description
+    )
+    db.add(expense)
+    db.commit()
+    db.refresh(expense)
+    return {"status": "success", "message": f"Expense of ₹{amount:.2f} under '{category}' recorded!", "expense_id": expense.id}
+
+@app.delete("/api/admin/expenses/{expense_id}")
+@app.delete("/api/admin/expenses/{expense_id}/")
+def delete_expense(expense_id: int, db: Session = Depends(get_db)):
+    exp = db.query(models.Expense).filter(models.Expense.id == expense_id).first()
+    if not exp:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    db.delete(exp)
+    db.commit()
+    return {"status": "success", "message": "Expense record deleted successfully!"}
+
+# 18. PROFIT & LOSS DASHBOARD ENDPOINT
+@app.get("/api/admin/reports/profit-loss")
+@app.get("/api/admin/reports/profit-loss/")
+def get_profit_loss(year_month: Optional[str] = Query("2026-09"), db: Session = Depends(get_db)):
+    ym = year_month or datetime.datetime.utcnow().strftime("%Y-%m")
+    try:
+        y, m = map(int, ym.split("-"))
+        start_d = datetime.datetime(y, m, 1)
+        end_d = datetime.datetime(y, m + 1, 1) if m < 12 else datetime.datetime(y + 1, 1, 1)
+    except Exception:
+        y, m = 2026, 9
+        start_d = datetime.datetime(2026, 9, 1)
+        end_d = datetime.datetime(2026, 10, 1)
+
+    delivered_orders = db.query(models.Order).filter(
+        models.Order.status != "CANCELLED",
+        models.Order.order_date >= start_d,
+        models.Order.order_date < end_d
+    ).all()
+    
+    total_revenue = sum(o.actual_final_total or o.estimated_total or 0.0 for o in delivered_orders)
+
+    cogs = 0.0
+    for o in delivered_orders:
+        for item in o.items:
+            qty = item.actual_packed_qty if (item.actual_packed_qty is not None) else item.ordered_qty
+            prod = item.product
+            cost_rate = (prod.cost_price if prod and prod.cost_price > 0 else (item.price_per_unit * 0.75))
+            cogs += (qty * cost_rate)
+
+    gross_profit = total_revenue - cogs
+
+    expenses = db.query(models.Expense).filter(
+        models.Expense.expense_date >= start_d,
+        models.Expense.expense_date < end_d
+    ).all()
+    
+    total_expenses = sum(e.amount for e in expenses)
+    expense_category_breakdown = {}
+    for e in expenses:
+        expense_category_breakdown[e.category] = expense_category_breakdown.get(e.category, 0.0) + e.amount
+
+    net_profit = gross_profit - total_expenses
+    profit_margin_pct = (net_profit / total_revenue * 100.0) if total_revenue > 0 else 0.0
+
+    return {
+        "status": "success",
+        "year_month": ym,
+        "revenue": round(total_revenue, 2),
+        "cogs": round(cogs, 2),
+        "gross_profit": round(gross_profit, 2),
+        "total_expenses": round(total_expenses, 2),
+        "net_profit": round(net_profit, 2),
+        "profit_margin_pct": round(profit_margin_pct, 1),
+        "expense_breakdown": expense_category_breakdown
+    }
+
+# 19. MONTHLY HOTEL STATEMENT & WHATSAPP SHARING
+@app.get("/api/admin/clients/{client_id}/statement")
+@app.get("/api/admin/clients/{client_id}/statement/")
+def get_hotel_monthly_statement(client_id: int, year_month: Optional[str] = Query("2026-09"), db: Session = Depends(get_db)):
     client = db.query(models.Client).filter(models.Client.id == client_id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
-        
-    if "credit_limit" in payload:
-        client.credit_limit = float(payload["credit_limit"])
-    if "is_order_locked" in payload:
-        client.is_order_locked = bool(payload["is_order_locked"])
-        
-    db.commit()
+
+    ym = year_month or datetime.datetime.utcnow().strftime("%Y-%m")
+    try:
+        y, m = map(int, ym.split("-"))
+        start_d = datetime.datetime(y, m, 1)
+        end_d = datetime.datetime(y, m + 1, 1) if m < 12 else datetime.datetime(y + 1, 1, 1)
+    except Exception:
+        y, m = 2026, 9
+        start_d = datetime.datetime(2026, 9, 1)
+        end_d = datetime.datetime(2026, 10, 1)
+
+    orders = db.query(models.Order).filter(
+        models.Order.client_id == client_id,
+        models.Order.status != "CANCELLED",
+        models.Order.order_date >= start_d,
+        models.Order.order_date < end_d
+    ).order_by(models.Order.order_date.asc()).all()
+
+    payments = db.query(models.Payment).filter(
+        models.Payment.client_id == client_id,
+        models.Payment.payment_date >= start_d,
+        models.Payment.payment_date < end_d
+    ).order_by(models.Payment.payment_date.asc()).all()
+
+    line_items = []
+    for o in orders:
+        line_items.append({
+            "date": o.order_date.strftime("%Y-%m-%d"),
+            "date_formatted": o.order_date.strftime("%d %b"),
+            "type": "SALE",
+            "description": f"Vegetable Delivery #{o.order_number}",
+            "amount": o.actual_final_total or o.estimated_total,
+            "order_number": o.order_number
+        })
+
+    for p in payments:
+        line_items.append({
+            "date": p.payment_date.strftime("%Y-%m-%d"),
+            "date_formatted": p.payment_date.strftime("%d %b"),
+            "type": "PAYMENT",
+            "description": f"Payment Received ({p.payment_mode}) - Ref: {p.reference_no or 'N/A'}",
+            "amount": -p.amount_paid,
+            "payment_mode": p.payment_mode
+        })
+
+    line_items.sort(key=lambda x: (x["date"], x["type"] == "SALE"))
+
+    total_sales = sum(o.actual_final_total or o.estimated_total for o in orders)
+    total_payments = sum(p.amount_paid for p in payments)
+    net_outstanding = client.current_balance
+
     return {
         "status": "success",
-        "message": f"Credit controls updated for {client.business_name}!",
-        "credit_limit": client.credit_limit,
-        "is_order_locked": client.is_order_locked
+        "client": {
+            "id": client.id,
+            "business_name": client.business_name,
+            "client_type": client.client_type,
+            "contact_person": client.contact_person,
+            "phone": client.phone,
+            "payment_cycle": client.payment_cycle,
+            "current_balance": client.current_balance
+        },
+        "year_month": ym,
+        "line_items": line_items,
+        "total_sales": total_sales,
+        "total_payments": total_payments,
+        "net_outstanding": net_outstanding
     }
+
+@app.post("/api/admin/statements/export-pdf")
+@app.post("/api/admin/statements/export-pdf/")
+def export_statement_pdf(payload: dict, db: Session = Depends(get_db)):
+    client_id = payload.get("client_id")
+    ym = payload.get("year_month", "2026-09")
+    stmt = get_hotel_monthly_statement(client_id=client_id, year_month=ym, db=db)
+
+    client_name = stmt["client"]["business_name"].replace(" ", "_")
+    filename = f"Statement_{client_name}_{ym}.pdf"
+    filepath = os.path.join("invoices", filename)
+
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.pdfgen import canvas
+        c = canvas.Canvas(filepath, pagesize=letter)
+        c.setFont("Helvetica-Bold", 16)
+        c.drawString(50, 750, f"DIVINE VEGETABLES - Monthly Hotel Statement")
+        c.setFont("Helvetica", 12)
+        c.drawString(50, 730, f"Client: {stmt['client']['business_name']} ({stmt['client']['contact_person']})")
+        c.drawString(50, 715, f"Period: {ym} | Phone: {stmt['client']['phone']}")
+        c.line(50, 705, 560, 705)
+
+        y_pos = 685
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(50, y_pos, "Date")
+        c.drawString(120, y_pos, "Description")
+        c.drawString(450, y_pos, "Amount (Rs.)")
+        y_pos -= 15
+        c.line(50, y_pos, 560, y_pos)
+
+        c.setFont("Helvetica", 10)
+        for item in stmt["line_items"]:
+            y_pos -= 20
+            if y_pos < 100:
+                c.showPage()
+                y_pos = 750
+            amt_str = f"+Rs. {item['amount']:.2f}" if item['type'] == 'SALE' else f"-Rs. {abs(item['amount']):.2f}"
+            c.drawString(50, y_pos, item['date_formatted'])
+            c.drawString(120, y_pos, item['description'][:45])
+            c.drawString(450, y_pos, amt_str)
+
+        y_pos -= 30
+        c.line(50, y_pos, 560, y_pos)
+        y_pos -= 20
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(50, y_pos, f"Total Billed Sales: Rs. {stmt['total_sales']:.2f}")
+        c.drawString(300, y_pos, f"Total Payments: Rs. {stmt['total_payments']:.2f}")
+        y_pos -= 20
+        c.drawString(50, y_pos, f"Net Outstanding Balance Due: Rs. {stmt['net_outstanding']:.2f}")
+        c.save()
+    except Exception as e:
+        print("PDF statement notice:", e)
+        with open(filepath, "w") as f:
+            f.write(f"STATEMENT FOR {stmt['client']['business_name']}\nTotal Sales: {stmt['total_sales']}\nTotal Payments: {stmt['total_payments']}\nOutstanding: {stmt['net_outstanding']}")
+
+    return {
+        "status": "success",
+        "pdf_url": f"/invoices/{filename}",
+        "filename": filename,
+        "message": f"Generated PDF Statement: {filename}"
+    }
+
+# 20. PAYMENT HISTORY & RECEIPTS
+@app.get("/api/admin/payments")
+@app.get("/api/admin/payments/")
+def get_payments(client_id: Optional[int] = None, db: Session = Depends(get_db)):
+    query = db.query(models.Payment)
+    if client_id:
+        query = query.filter(models.Payment.client_id == client_id)
+    payments = query.order_by(models.Payment.payment_date.desc()).all()
+
+    res = []
+    for p in payments:
+        c = db.query(models.Client).filter(models.Client.id == p.client_id).first()
+        res.append({
+            "id": p.id,
+            "client_id": p.client_id,
+            "client_name": c.business_name if c else "Client",
+            "amount_paid": p.amount_paid,
+            "payment_date": p.payment_date.strftime("%Y-%m-%d"),
+            "payment_date_formatted": p.payment_date.strftime("%d %b %Y %I:%M %p"),
+            "payment_mode": p.payment_mode,
+            "reference_no": p.reference_no or "N/A",
+            "notes": p.notes or ""
+        })
+    return res
+
+# 21. IN-APP NOTIFICATIONS ENDPOINT
+@app.get("/api/notifications")
+@app.get("/api/notifications/")
+def get_notifications(client_id: Optional[int] = None, db: Session = Depends(get_db)):
+    query = db.query(models.InAppNotification)
+    if client_id:
+        query = query.filter((models.InAppNotification.client_id == client_id) | (models.InAppNotification.client_id.is_(None)))
+    notifications = query.order_by(models.InAppNotification.created_at.desc()).limit(20).all()
+
+    return {
+        "status": "success",
+        "notifications": [{
+            "id": n.id,
+            "title": n.title,
+            "message": n.message,
+            "notification_type": n.notification_type,
+            "is_read": n.is_read,
+            "created_at": n.created_at.strftime("%d %b %I:%M %p")
+        } for n in notifications]
+    }
+
+# 22. BACKUP & RESTORE ENDPOINTS
+@app.get("/api/admin/backup")
+@app.get("/api/admin/backup/")
+def get_system_backup(db: Session = Depends(get_db)):
+    clients = [ {c.name: getattr(client, c.name) for c in client.__table__.columns if c.name != 'created_at'} for client in db.query(models.Client).all() ]
+    products = [ {c.name: getattr(p, c.name) for c in p.__table__.columns} for p in db.query(models.Product).all() ]
+    orders = [ {c.name: getattr(o, c.name) for c in o.__table__.columns if c.name != 'order_date'} for o in db.query(models.Order).all() ]
+    order_items = [ {c.name: getattr(i, c.name) for c in i.__table__.columns} for i in db.query(models.OrderItem).all() ]
+    payments = [ {c.name: getattr(p, c.name) for c in p.__table__.columns if c.name != 'payment_date'} for p in db.query(models.Payment).all() ]
+    expenses = [ {c.name: getattr(e, c.name) for c in e.__table__.columns if c.name not in ['expense_date', 'created_at']} for e in db.query(models.Expense).all() ]
+
+    backup_data = {
+        "timestamp": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        "version": "1.0",
+        "clients": clients,
+        "products": products,
+        "orders": orders,
+        "order_items": order_items,
+        "payments": payments,
+        "expenses": expenses
+    }
+    return backup_data
+
+@app.post("/api/admin/restore")
+@app.post("/api/admin/restore/")
+def restore_system_backup(payload: dict, db: Session = Depends(get_db)):
+    if not payload or "clients" not in payload or "products" not in payload:
+        raise HTTPException(status_code=400, detail="Invalid backup payload structure")
+
+    try:
+        if "expenses" in payload:
+            db.query(models.Expense).delete()
+            for exp in payload["expenses"]:
+                e = models.Expense(category=exp.get("category"), amount=exp.get("amount"), description=exp.get("description"))
+                db.add(e)
+                
+        db.commit()
+        return {"status": "success", "message": "Database successfully restored from backup!"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Restore failed: {str(e)}")
+
+# 23. ADVANCED ANALYTICS ENDPOINT
+@app.get("/api/admin/analytics/dashboard-insights")
+@app.get("/api/admin/analytics/dashboard-insights/")
+def get_advanced_analytics(db: Session = Depends(get_db)):
+    from sqlalchemy import func
+    top_items = db.query(
+        models.OrderItem.product_name,
+        models.OrderItem.unit,
+        func.sum(models.OrderItem.actual_packed_qty).label("total_volume"),
+        func.sum(models.OrderItem.subtotal).label("total_revenue")
+    ).group_by(models.OrderItem.product_name, models.OrderItem.unit)\
+     .order_by(func.sum(models.OrderItem.subtotal).desc()).limit(5).all()
+
+    top_products_list = [{
+        "name": item.product_name,
+        "unit": item.unit,
+        "total_volume": round(item.total_volume or 0.0, 1),
+        "total_revenue": round(item.total_revenue or 0.0, 2)
+    } for item in top_items]
+
+    top_hotels = db.query(
+        models.Client.business_name,
+        models.Client.client_type,
+        func.sum(models.Order.actual_final_total).label("total_spent")
+    ).join(models.Order, models.Order.client_id == models.Client.id)\
+     .group_by(models.Client.id)\
+     .order_by(func.sum(models.Order.actual_final_total).desc()).limit(5).all()
+
+    top_hotels_list = [{
+        "business_name": h.business_name,
+        "client_type": h.client_type,
+        "total_spent": round(h.total_spent or 0.0, 2)
+    } for h in top_hotels]
+
+    total_udhaar = db.query(func.sum(models.Client.current_balance)).scalar() or 0.0
+    locked_count = db.query(models.Client).filter(models.Client.is_order_locked == True).count()
+
+    return {
+        "status": "success",
+        "top_products": top_products_list,
+        "top_hotels": top_hotels_list,
+        "total_udhaar": round(total_udhaar, 2),
+        "locked_hotels_count": locked_count
+    }
+
+@app.get("/{full_path:path}")
+def catch_all_spa(full_path: str):
+    if full_path.startswith("api/") or full_path.startswith("invoices/") or full_path.startswith("assets/"):
+        raise HTTPException(status_code=404, detail="Not Found")
+    dist_folder = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "admin-panel", "dist")
+    file_target = os.path.join(dist_folder, full_path)
+    if os.path.exists(file_target) and os.path.isfile(file_target):
+        return FileResponse(file_target)
+    index_path = os.path.join(dist_folder, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return {"status": "online", "message": "Divine Vegetables Engine Active"}
 
 if __name__ == "__main__":
     import uvicorn

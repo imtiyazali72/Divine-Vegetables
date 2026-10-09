@@ -43,6 +43,7 @@ class Product(Base):
     default_unit = Column(String, default="KG")  # KG, PETI, BAG, PIECE, GUCHHA
     base_rate_hotel = Column(Float, default=0.0)
     base_rate_cafe = Column(Float, default=0.0)
+    cost_price = Column(Float, default=0.0)  # Procurement / mandi base cost price for P&L
     image_url = Column(String, nullable=True)
     is_available = Column(Boolean, default=True)
 
@@ -147,5 +148,25 @@ class PriceHistory(Base):
     recorded_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     product = relationship("Product")
+
+class Expense(Base):
+    __tablename__ = "expenses"
+    id = Column(Integer, primary_key=True, index=True)
+    category = Column(String, index=True)  # Delivery, Transport, Salary, Fuel, Maintenance, Other
+    amount = Column(Float, nullable=False)
+    expense_date = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+    description = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class InAppNotification(Base):
+    __tablename__ = "in_app_notifications"
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True)
+    title = Column(String, nullable=False)
+    message = Column(Text, nullable=False)
+    notification_type = Column(String, default="INFO")  # ORDER_CONFIRM, PAYMENT_RECEIPT, STATEMENT_READY, REMINDER
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
 
 

@@ -5,7 +5,6 @@ admin-panel/node_modules/
 # Production Builds
 dist/
 build/
-admin-panel/dist/
 
 # Python Cache & Virtual Envs
 __pycache__/
