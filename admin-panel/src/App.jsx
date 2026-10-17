@@ -455,12 +455,20 @@ export default function App() {
 
   const handleUpdateCreditLimit = async (clientId, creditLimit, isOrderLocked) => {
     try {
-      const res = await smartFetch(`/admin/clients/${clientId}/credit-limit`, {
+      let res = await smartFetch(`/admin/clients/${clientId}/credit-limit`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ credit_limit: creditLimit, is_order_locked: isOrderLocked })
       });
-      if (res.ok) {
+      if (!res || !res.ok) {
+        res = await smartFetch(`/admin/clients/${clientId}/credit-limit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ credit_limit: creditLimit, is_order_locked: isOrderLocked })
+        });
+      }
+      if (res && res.ok) {
+        setClients(prev => prev.map(c => c.id === clientId ? { ...c, credit_limit: creditLimit, is_order_locked: isOrderLocked } : c));
         await fetchData();
         return true;
       }

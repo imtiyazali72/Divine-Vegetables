@@ -223,6 +223,15 @@ export default function ClientPortal({ clients, products, cutoffInfo, onPlaceOrd
       return;
     }
 
+    const matchedClient = Array.isArray(clients) && currentUser?.client?.id
+      ? clients.find(c => c.id === currentUser.client.id)
+      : null;
+    const isLocked = Boolean(matchedClient?.is_order_locked ?? currentUser?.client?.is_order_locked);
+    if (isLocked) {
+      alert("⚠️ Your ordering privileges are currently locked by Divine Vegetables Admin due to overdue balance. Please contact Divine Vegetables Admin to unlock.");
+      return;
+    }
+
     setSubmitting(true);
     const itemsPayload = Object.entries(cart).map(([prodId, qty]) => {
       const prod = displayProducts.find(p => p.id === parseInt(prodId));
@@ -426,7 +435,10 @@ export default function ClientPortal({ clients, products, cutoffInfo, onPlaceOrd
   }
 
   // LOGGED IN CLIENT PORTAL
-  const clientInfo = currentUser.client || {};
+  const matchedClient = Array.isArray(clients) && currentUser?.client?.id
+    ? clients.find(c => c.id === currentUser.client.id)
+    : null;
+  const clientInfo = { ...(currentUser?.client || {}), ...(matchedClient || {}) };
 
   return (
     <div className="space-y-8">
@@ -657,10 +669,18 @@ export default function ClientPortal({ clients, products, cutoffInfo, onPlaceOrd
 
               <button 
                 type="submit"
-                disabled={submitting || Object.keys(cart).length === 0}
-                className="emerald-btn w-full justify-center text-sm py-3"
+                disabled={submitting || Object.keys(cart).length === 0 || Boolean(clientInfo.is_order_locked)}
+                className={`w-full justify-center text-sm py-3 font-bold rounded-xl transition-all ${
+                  Boolean(clientInfo.is_order_locked)
+                    ? 'bg-rose-950/80 border border-rose-600/50 text-rose-300 cursor-not-allowed'
+                    : 'emerald-btn'
+                }`}
               >
-                {submitting ? 'Submitting Order...' : '🚀 Send Order to Divine Vegetables'}
+                {submitting 
+                  ? 'Submitting Order...' 
+                  : Boolean(clientInfo.is_order_locked)
+                    ? '🔒 Ordering Locked (Contact Admin)' 
+                    : '🚀 Send Order to Divine Vegetables'}
               </button>
             </form>
           </div>

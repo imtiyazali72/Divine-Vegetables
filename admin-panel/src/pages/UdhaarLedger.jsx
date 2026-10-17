@@ -57,6 +57,7 @@ export default function UdhaarLedger({ clients = [], onRecordPayment, onUpdateCr
   const [newContactPerson, setNewContactPerson] = useState('');
 
   const [editingCreditLimit, setEditingCreditLimit] = useState({});
+  const [updatingLockId, setUpdatingLockId] = useState(null);
 
   const sendWhatsAppReminder = (c) => {
     if (!whatsappEnabled) {
@@ -85,13 +86,33 @@ export default function UdhaarLedger({ clients = [], onRecordPayment, onUpdateCr
     const num = parseFloat(val);
     if (isNaN(num)) return;
     if (onUpdateCreditLimit) {
-      await onUpdateCreditLimit(c.id, num, c.is_order_locked);
+      await onUpdateCreditLimit(c.id, num, Boolean(c.is_order_locked));
     }
   };
 
   const handleToggleLock = async (c) => {
-    if (onUpdateCreditLimit) {
-      await onUpdateCreditLimit(c.id, c.credit_limit, !c.is_order_locked);
+    const isCurrentlyLocked = Boolean(c.is_order_locked);
+    const newLockState = !isCurrentlyLocked;
+    const confirmMessage = newLockState
+      ? `🔒 LOCK ORDERING for "${c.business_name}"?\n\nClient will not be able to place new vegetable orders until unlocked.`
+      : `🟢 UNLOCK ORDERING for "${c.business_name}"?\n\nClient will be allowed to place orders immediately.`;
+
+    if (!window.confirm(confirmMessage)) return;
+
+    setUpdatingLockId(c.id);
+    try {
+      if (onUpdateCreditLimit) {
+        const success = await onUpdateCreditLimit(c.id, c.credit_limit, newLockState);
+        if (success) {
+          alert(`✅ Account for ${c.business_name} is now ${newLockState ? 'LOCKED 🔒' : 'UNLOCKED & ACTIVE 🟢'}!`);
+        } else {
+          alert(`⚠️ Failed to update lock status. Please check backend connection.`);
+        }
+      }
+    } catch (err) {
+      alert(`⚠️ Error updating lock status: ${err.message || 'Unknown error'}`);
+    } finally {
+      setUpdatingLockId(null);
     }
   };
 
@@ -338,14 +359,19 @@ export default function UdhaarLedger({ clients = [], onRecordPayment, onUpdateCr
 
                 <button
                   type="button"
+                  disabled={updatingLockId === c.id}
                   onClick={() => handleToggleLock(c)}
                   className={`w-full text-xs font-bold py-2 rounded-xl border transition-all ${
-                    c.is_order_locked
+                    Boolean(c.is_order_locked)
                       ? 'bg-rose-950/80 border-rose-600 text-rose-300 hover:bg-rose-900 font-extrabold shadow-lg'
                       : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
                   }`}
                 >
-                  {c.is_order_locked ? '🔴 Locked (Click to 🔓 Unlock Account)' : '🟢 Active (Click to 🔒 Lock Account)'}
+                  {updatingLockId === c.id
+                    ? '⏳ Updating Status...'
+                    : Boolean(c.is_order_locked)
+                      ? '🔴 Locked (Click to 🔓 Unlock Account)'
+                      : '🟢 Active (Click to 🔒 Lock Account)'}
                 </button>
               </div>
             );
@@ -426,15 +452,20 @@ export default function UdhaarLedger({ clients = [], onRecordPayment, onUpdateCr
                     <td>
                       <button
                         type="button"
+                        disabled={updatingLockId === c.id}
                         onClick={() => handleToggleLock(c)}
                         className={`text-xs font-bold px-3 py-1.5 rounded-xl border transition-all ${
-                          c.is_order_locked
+                          Boolean(c.is_order_locked)
                             ? 'bg-rose-950/80 border-rose-600 text-rose-300 hover:bg-rose-900 font-extrabold shadow-lg shadow-rose-950/60'
                             : 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/40'
                         }`}
-                        title={c.is_order_locked ? "Click to unlock client ordering" : "Click to lock client ordering"}
+                        title={Boolean(c.is_order_locked) ? "Click to unlock client ordering" : "Click to lock client ordering"}
                       >
-                        {c.is_order_locked ? '🔴 Locked (Click to 🔓 Unlock)' : '🟢 Active (Click to 🔒 Lock)'}
+                        {updatingLockId === c.id
+                          ? '⏳ Updating...'
+                          : Boolean(c.is_order_locked)
+                            ? '🔴 Locked (Click to 🔓 Unlock)'
+                            : '🟢 Active (Click to 🔒 Lock)'}
                       </button>
                     </td>
                     <td>

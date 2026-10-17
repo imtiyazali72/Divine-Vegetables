@@ -93,10 +93,30 @@ def seed_database():
                     if "updated_at" not in route_cols:
                         conn.execute(text("ALTER TABLE delivery_routes ADD COLUMN updated_at DATETIME"))
                 conn.commit()
+        else:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS security_question VARCHAR"))
+                conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS security_answer VARCHAR"))
+                conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS is_order_locked BOOLEAN DEFAULT FALSE"))
+                conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS credit_limit FLOAT DEFAULT 50000.0"))
+                conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_price FLOAT DEFAULT 0.0"))
+                conn.execute(text("ALTER TABLE delivery_routes ADD COLUMN IF NOT EXISTS latitude FLOAT DEFAULT 21.1458"))
+                conn.execute(text("ALTER TABLE delivery_routes ADD COLUMN IF NOT EXISTS longitude FLOAT DEFAULT 79.0882"))
+                conn.execute(text("ALTER TABLE delivery_routes ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP"))
+                conn.commit()
     except Exception as e:
         print("Migration check info:", e)
 
     db = next(get_db())
+    # Auto-unlock Cafinity Cafe if mistakenly locked
+    try:
+        caf_list = db.query(models.Client).filter(models.Client.business_name.ilike("%Cafinity%")).all()
+        for caf in caf_list:
+            if getattr(caf, 'is_order_locked', False):
+                caf.is_order_locked = False
+        db.commit()
+    except Exception as e:
+        print("Cafinity unlock notice:", e)
     # Create Owner User if not exists (Default initial password '1234', no pre-set security answer)
     owner = db.query(models.User).filter(models.User.username == "admin").first()
     if not owner:
@@ -254,7 +274,29 @@ def login(payload: dict, db: Session = Depends(get_db)):
                 "business_name": c.business_name,
                 "client_type": c.client_type,
                 "payment_cycle": c.payment_cycle,
-                "current_balance": c.current_balance,
+                "credit_limit": float(c.credit_limit or 50000.0),
+                "current_balance": float(c.current_balance or 0.0),
+                "is_order_locked": bool(getattr(c, 'is_order_locked', False)),
+                "phone": c.phone,
+                "address": c.address,
+                "contact_person": c.contact_person
+            }
+            
+    if not client_info and user.role != "OWNER":
+        c = db.query(models.Client).filter(
+            (models.Client.phone == user.username) | (models.Client.business_name.ilike(user.username))
+        ).first()
+        if c:
+            user.client_id = c.id
+            db.commit()
+            client_info = {
+                "id": c.id,
+                "business_name": c.business_name,
+                "client_type": c.client_type,
+                "payment_cycle": c.payment_cycle,
+                "credit_limit": float(c.credit_limit or 50000.0),
+                "current_balance": float(c.current_balance or 0.0),
+                "is_order_locked": bool(getattr(c, 'is_order_locked', False)),
                 "phone": c.phone,
                 "address": c.address,
                 "contact_person": c.contact_person
@@ -296,6 +338,7 @@ def register_client(payload: dict, db: Session = Depends(get_db)):
         payment_cycle="WEEKLY",
         credit_limit=50000.0,
         current_balance=0.0,
+        is_order_locked=False,
         address=address or "City Center",
         phone=phone,
         contact_person=contact_person or business_name
@@ -1006,8 +1049,9 @@ def get_clients(db: Session = Depends(get_db)):
         "business_name": c.business_name,
         "client_type": c.client_type,
         "payment_cycle": c.payment_cycle,
-        "credit_limit": c.credit_limit,
-        "current_balance": c.current_balance,
+        "credit_limit": float(c.credit_limit or 50000.0),
+        "current_balance": float(c.current_balance or 0.0),
+        "is_order_locked": bool(getattr(c, 'is_order_locked', False)),
         "address": c.address,
         "phone": c.phone,
         "contact_person": c.contact_person
@@ -1050,6 +1094,87 @@ def record_payment(payload: dict, db: Session = Depends(get_db)):
 
     db.commit()
     return {"status": "success", "new_balance": client.current_balance, "message": f"Payment of ₹{amount:.2f} recorded!"}
+
+# 11.1 UPDATE CLIENT CREDIT LIMIT & ORDER LOCK STATUS
+@app.put("/api/admin/clients/{client_id}/credit-limit")
+@app.put("/api/admin/clients/{client_id}/credit-limit/")
+@app.post("/api/admin/clients/{client_id}/credit-limit")
+@app.post("/api/admin/clients/{client_id}/credit-limit/")
+@app.patch("/api/admin/clients/{client_id}/credit-limit")
+@app.patch("/api/admin/clients/{client_id}/credit-limit/")
+@app.put("/admin/clients/{client_id}/credit-limit")
+@app.put("/admin/clients/{client_id}/credit-limit/")
+@app.post("/admin/clients/{client_id}/credit-limit")
+@app.post("/admin/clients/{client_id}/credit-limit/")
+def update_client_credit_limit(client_id: int, payload: dict, db: Session = Depends(get_db)):
+    client = db.query(models.Client).filter(models.Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    if "credit_limit" in payload:
+        try:
+            client.credit_limit = float(payload["credit_limit"])
+        except (ValueError, TypeError):
+            pass
+            
+    if "is_order_locked" in payload:
+        val = payload["is_order_locked"]
+        if isinstance(val, str):
+            client.is_order_locked = val.lower() in ("true", "1", "yes", "lock", "locked")
+        else:
+            client.is_order_locked = bool(val)
+            
+    db.commit()
+    db.refresh(client)
+    return {
+        "status": "success",
+        "message": f"Updated credit limit & lock status for {client.business_name}",
+        "client": {
+            "id": client.id,
+            "business_name": client.business_name,
+            "credit_limit": client.credit_limit,
+            "is_order_locked": bool(client.is_order_locked)
+        }
+    }
+
+@app.post("/api/admin/clients/{client_id}/toggle-lock")
+@app.post("/api/admin/clients/{client_id}/toggle-lock/")
+@app.put("/api/admin/clients/{client_id}/toggle-lock")
+@app.put("/api/admin/clients/{client_id}/toggle-lock/")
+@app.post("/admin/clients/{client_id}/toggle-lock")
+@app.post("/admin/clients/{client_id}/toggle-lock/")
+def toggle_client_order_lock(client_id: int, payload: dict = None, db: Session = Depends(get_db)):
+    client = db.query(models.Client).filter(models.Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    if payload and "is_order_locked" in payload:
+        val = payload["is_order_locked"]
+        if isinstance(val, str):
+            client.is_order_locked = val.lower() in ("true", "1", "yes", "lock", "locked")
+        else:
+            client.is_order_locked = bool(val)
+    else:
+        client.is_order_locked = not bool(getattr(client, 'is_order_locked', False))
+        
+    db.commit()
+    db.refresh(client)
+    return {
+        "status": "success",
+        "message": f"Client ordering is now {'LOCKED' if client.is_order_locked else 'ACTIVE'} for {client.business_name}",
+        "is_order_locked": bool(client.is_order_locked)
+    }
+
+@app.post("/api/admin/clients/{client_id}/unlock")
+@app.post("/api/admin/clients/{client_id}/unlock/")
+@app.get("/api/admin/clients/{client_id}/unlock")
+def unlock_client_order(client_id: int, db: Session = Depends(get_db)):
+    client = db.query(models.Client).filter(models.Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    client.is_order_locked = False
+    db.commit()
+    return {"status": "success", "message": f"{client.business_name} order account unlocked!", "is_order_locked": False}
 
 # 12. MONTHLY BUSINESS INTELLIGENCE REPORTS
 @app.get("/api/admin/reports/monthly")
