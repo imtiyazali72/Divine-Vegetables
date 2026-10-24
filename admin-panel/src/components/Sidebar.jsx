@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 
 export default function Sidebar({ 
   activeTab, 
@@ -14,6 +14,46 @@ export default function Sidebar({
 }) {
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [showSoundModal, setShowSoundModal] = useState(false);
+  const desktopSidebarRef = useRef(null);
+  const mobileDrawerRef = useRef(null);
+
+  // Isolate sidebar scrolling: Prevent scroll chaining to the main page when hitting top/bottom boundaries
+  useEffect(() => {
+    const attachBoundaryLock = (el) => {
+      if (!el) return () => {};
+
+      const onWheel = (e) => {
+        const { scrollTop, scrollHeight, clientHeight } = el;
+
+        // If content fits completely inside sidebar without scrolling, cancel wheel to isolate sidebar
+        if (scrollHeight <= clientHeight) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+
+        const isAtTop = scrollTop <= 1;
+        const isAtBottom = Math.ceil(scrollTop + clientHeight) >= scrollHeight - 1;
+
+        // When at top limit and scrolling up, or at bottom limit and scrolling down, prevent main page from scrolling
+        if ((e.deltaY < 0 && isAtTop) || (e.deltaY > 0 && isAtBottom)) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      };
+
+      el.addEventListener('wheel', onWheel, { passive: false });
+      return () => el.removeEventListener('wheel', onWheel);
+    };
+
+    const cleanupDesktop = attachBoundaryLock(desktopSidebarRef.current);
+    const cleanupMobile = attachBoundaryLock(mobileDrawerRef.current);
+
+    return () => {
+      cleanupDesktop();
+      cleanupMobile();
+    };
+  }, [mobileDrawerOpen]);
 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: '📊' },
@@ -43,7 +83,11 @@ export default function Sidebar({
   return (
     <>
       {/* DESKTOP STICKY LEFT VERTICAL SIDEBAR (REAL iOS LIQUID GLASS + NO SCROLLBAR) */}
-      <aside className="hidden md:flex flex-col w-64 fixed left-0 top-0 h-screen sidebar-real-glass no-scrollbar z-50 p-5 justify-between overflow-y-auto">
+      <aside 
+        ref={desktopSidebarRef}
+        className="hidden md:flex flex-col w-64 fixed left-0 top-0 h-screen sidebar-real-glass no-scrollbar z-50 p-5 justify-between overflow-y-auto overscroll-contain"
+        style={{ overscrollBehavior: 'contain', overscrollBehaviorY: 'contain' }}
+      >
         <div className="space-y-6">
           
           {/* Brand & Logo Header */}
@@ -239,7 +283,11 @@ export default function Sidebar({
       {/* MOBILE SLIDE-OVER DRAWER (LIQUID GLASS) */}
       {mobileDrawerOpen && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-2xl z-50 flex md:hidden animate-fade-in">
-          <div className="w-80 bg-slate-950/95 border-r border-white/10 h-full p-5 space-y-5 flex flex-col justify-between shadow-2xl backdrop-blur-2xl overflow-y-auto">
+          <div 
+            ref={mobileDrawerRef}
+            className="w-80 bg-slate-950/95 border-r border-white/10 h-full p-5 space-y-5 flex flex-col justify-between shadow-2xl backdrop-blur-2xl overflow-y-auto overscroll-contain"
+            style={{ overscrollBehavior: 'contain', overscrollBehaviorY: 'contain' }}
+          >
             <div className="space-y-5">
               <div className="flex justify-between items-center pb-3 border-b border-white/10">
                 <div className="flex items-center gap-2">
