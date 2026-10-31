@@ -1176,6 +1176,50 @@ def unlock_client_order(client_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"status": "success", "message": f"{client.business_name} order account unlocked!", "is_order_locked": False}
 
+@app.put("/api/clients/{client_id}/profile")
+@app.put("/api/clients/{client_id}/profile/")
+@app.post("/api/clients/{client_id}/profile")
+@app.post("/api/clients/{client_id}/profile/")
+def update_client_profile(client_id: int, payload: dict, db: Session = Depends(get_db)):
+    client = db.query(models.Client).filter(models.Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+        
+    if "business_name" in payload and str(payload["business_name"]).strip():
+        client.business_name = str(payload["business_name"]).strip()
+    if "contact_person" in payload:
+        client.contact_person = str(payload["contact_person"]).strip()
+    if "phone" in payload and str(payload["phone"]).strip():
+        client.phone = str(payload["phone"]).strip()
+    if "address" in payload:
+        client.address = str(payload["address"]).strip()
+        
+    user = db.query(models.User).filter(models.User.client_id == client.id).first()
+    if user:
+        if client.contact_person:
+            user.full_name = client.contact_person
+        if client.phone:
+            user.username = client.phone
+            
+    db.commit()
+    db.refresh(client)
+    return {
+        "status": "success",
+        "message": "Profile updated successfully!",
+        "client": {
+            "id": client.id,
+            "business_name": client.business_name,
+            "client_type": client.client_type,
+            "payment_cycle": client.payment_cycle,
+            "credit_limit": float(client.credit_limit or 50000.0),
+            "current_balance": float(client.current_balance or 0.0),
+            "is_order_locked": bool(getattr(client, 'is_order_locked', False)),
+            "phone": client.phone,
+            "address": client.address,
+            "contact_person": client.contact_person
+        }
+    }
+
 # 12. MONTHLY BUSINESS INTELLIGENCE REPORTS
 @app.get("/api/admin/reports/monthly")
 @app.get("/api/admin/reports/monthly/")

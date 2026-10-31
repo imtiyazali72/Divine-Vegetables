@@ -71,9 +71,42 @@ export default function ClientPortal({ clients, products, cutoffInfo, onPlaceOrd
   const [clientProducts, setClientProducts] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Category filter & Search state
+  const [selectedCategory, setSelectedCategory] = useState('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Client Profile Editing State
+  const [profileBusinessName, setProfileBusinessName] = useState('');
+  const [profileContactPerson, setProfileContactPerson] = useState('');
+  const [profilePhone, setProfilePhone] = useState('');
+  const [profileAddress, setProfileAddress] = useState('');
+  const [profileSubmitting, setProfileSubmitting] = useState(false);
+
+  useEffect(() => {
+    const c = currentUser?.client;
+    if (c) {
+      setProfileBusinessName(c.business_name || '');
+      setProfileContactPerson(c.contact_person || '');
+      setProfilePhone(c.phone || currentUser.username || '');
+      setProfileAddress(c.address || '');
+    }
+  }, [currentUser]);
+
   const displayProducts = (clientProducts && clientProducts.length > 0) 
     ? clientProducts 
     : ((Array.isArray(products) && products.length > 0) ? products : DEFAULT_PRODUCTS);
+
+  const availableCategories = ['ALL', ...new Set(displayProducts.map(p => p.category).filter(Boolean))];
+
+  const filteredProducts = displayProducts.filter(p => {
+    const matchesCat = selectedCategory === 'ALL' || p.category === selectedCategory;
+    const q = searchQuery.trim().toLowerCase();
+    const matchesSearch = !q || 
+      (p.name && p.name.toLowerCase().includes(q)) || 
+      (p.hindi_name && p.hindi_name.toLowerCase().includes(q)) ||
+      (p.category && p.category.toLowerCase().includes(q));
+    return matchesCat && matchesSearch;
+  });
 
   useEffect(() => {
     if (currentUser) {
@@ -121,6 +154,56 @@ export default function ClientPortal({ clients, products, cutoffInfo, onPlaceOrd
       await smartFetch(`/notifications/${notifId}/read`, { method: 'POST' });
       if (currentUser?.client?.id) fetchNotifications(currentUser.client.id);
     } catch (e) {}
+  };
+
+  const handleSaveProfile = async (e) => {
+    e.preventDefault();
+    const cId = currentUser?.client?.id;
+    if (!cId) {
+      alert("Please log in first to update profile.");
+      return;
+    }
+
+    setProfileSubmitting(true);
+    try {
+      const res = await smartFetch(`/clients/${cId}/profile`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          business_name: profileBusinessName,
+          contact_person: profileContactPerson,
+          phone: profilePhone,
+          address: profileAddress
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'success') {
+        setCurrentUser(prev => ({
+          ...prev,
+          username: profilePhone || prev.username,
+          full_name: profileContactPerson || prev.full_name,
+          client: {
+            ...prev.client,
+            ...data.client
+          }
+        }));
+        alert("✅ Profile updated successfully!");
+      } else {
+        alert(data.detail || "Failed to update profile.");
+      }
+    } catch (err) {
+      alert("Error saving profile: " + (err.message || 'Server connection error'));
+    } finally {
+      setProfileSubmitting(false);
+    }
+  };
+
+  const handleLogout = () => {
+    if (window.confirm("Are you sure you want to log out from Divine Vegetables?")) {
+      localStorage.removeItem('divine_client_user');
+      setCurrentUser(null);
+      if (setActiveSubTab) setActiveSubTab('catalog');
+    }
   };
 
   useEffect(() => {
@@ -444,33 +527,28 @@ export default function ClientPortal({ clients, products, cutoffInfo, onPlaceOrd
     <div className="space-y-8">
       
       {/* Logged-in Customer Banner */}
-      <div className="glass-panel p-6 border-l-4 border-l-blue-500 flex flex-col md:flex-row items-center justify-between gap-4">
+      <div className="glass-panel p-4 sm:p-5 border-l-4 border-l-emerald-500 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
         <div>
-          <div className="text-xs font-bold text-blue-400 uppercase tracking-wider">CLIENT PURCHASER PORTAL</div>
-          <h2 className="text-xl font-extrabold text-white flex items-center gap-2">
+          <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-2 flex-wrap">
             Welcome, <span className="text-emerald-400">{clientInfo.business_name}</span>
-            <span className="text-xs bg-slate-800 text-slate-300 px-2.5 py-0.5 rounded-full border border-slate-700 font-semibold">
+            <span className="text-[10px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold">
               {clientInfo.client_type}
             </span>
           </h2>
-          <p className="text-xs text-slate-400 mt-1">
-            Contact: {clientInfo.contact_person} ({clientInfo.phone}) • Address: {clientInfo.address}
+          <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
+            <span>👤 {clientInfo.contact_person || 'Purchaser'} ({clientInfo.phone})</span>
+            <span className="hidden sm:inline">•</span>
+            <span>📍 {clientInfo.address}</span>
           </p>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="bg-slate-900 px-4 py-2 rounded-xl border border-amber-500/30 text-right">
-            <div className="text-[10px] text-slate-400 uppercase font-bold">MANDI RATE POLICY</div>
-            <div className="text-xs font-bold text-amber-400">Daily Market Rates Applied on Dispatch</div>
-          </div>
-
-          <button 
-            onClick={() => setCurrentUser(null)}
-            className="outline-btn text-xs text-rose-400 border-rose-500/40 hover:bg-rose-500/10"
-          >
-            Logout
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => setActiveSubTab && setActiveSubTab('profile')}
+          className="text-xs font-bold text-slate-300 bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 self-end sm:self-center"
+        >
+          <span>👤 Profile &amp; Settings</span>
+        </button>
       </div>
 
       {/* Credit Limit & Order Locked Warning Banner */}
@@ -517,26 +595,36 @@ export default function ClientPortal({ clients, products, cutoffInfo, onPlaceOrd
       )}
 
       {/* Sub Tabs Navigation */}
-      <div className="flex gap-2 border-b border-slate-800 pb-2">
+      <div className="flex gap-2 border-b border-slate-800 pb-2 overflow-x-auto no-scrollbar">
         <button 
-          onClick={() => setActiveSubTab('catalog')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+          onClick={() => setActiveSubTab && setActiveSubTab('catalog')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 ${
             activeSubTab === 'catalog'
               ? 'bg-emerald-600 text-white shadow-md'
-              : 'text-slate-400 hover:text-slate-200'
+              : 'text-slate-400 hover:text-slate-200 bg-white/5'
           }`}
         >
-          🥬 Fresh Vegetable Catalog & Order
+          <span>🥬</span> Fresh Produce &amp; Order
         </button>
         <button 
-          onClick={() => setActiveSubTab('my-orders')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+          onClick={() => setActiveSubTab && setActiveSubTab('my-orders')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 ${
             activeSubTab === 'my-orders'
               ? 'bg-emerald-600 text-white shadow-md'
-              : 'text-slate-400 hover:text-slate-200'
+              : 'text-slate-400 hover:text-slate-200 bg-white/5'
           }`}
         >
-          🚚 My Orders & Delivery Status ({clientOrders.length})
+          <span>🚚</span> Deliveries ({clientOrders.length})
+        </button>
+        <button 
+          onClick={() => setActiveSubTab && setActiveSubTab('profile')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 ${
+            activeSubTab === 'profile'
+              ? 'bg-emerald-600 text-white shadow-md'
+              : 'text-slate-400 hover:text-slate-200 bg-white/5'
+          }`}
+        >
+          <span>👤</span> Profile &amp; Settings
         </button>
       </div>
 
@@ -546,53 +634,129 @@ export default function ClientPortal({ clients, products, cutoffInfo, onPlaceOrd
           
           {/* Vegetables Grid */}
           <div className="md:col-span-2 space-y-4">
-            <div className="flex justify-between items-center">
-              <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                Fresh Produce Catalog (Select Quantities in KG / Peti / Bag)
-              </h3>
-              <span className="text-[11px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2.5 py-1 rounded-full font-semibold">
-                🏷️ Market Rates Applied at Dispatch
-              </span>
+            
+            {/* Header: Clean, Attractive & Modern */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+                  <span className="text-xl">🥬</span> Select Fresh Produce
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Pick daily mandi items &amp; enter required quantity
+                </p>
+              </div>
+
+              {/* Quick Search */}
+              <div className="relative w-full sm:w-60">
+                <input 
+                  type="text"
+                  placeholder="🔍 Search vegetables..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="w-full text-xs bg-slate-900/90 border border-slate-700/80 rounded-xl px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                />
+                {searchQuery && (
+                  <button 
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2.5 top-2 text-xs text-slate-400 hover:text-white"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {displayProducts.map(p => {
+            {/* Category Filter Pills */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+              {availableCategories.map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`text-[11px] font-bold px-3 py-1 rounded-full whitespace-nowrap transition-all border ${
+                    selectedCategory === cat
+                      ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-extrabold shadow-sm'
+                      : 'bg-slate-900/60 text-slate-300 border-slate-800 hover:border-slate-700 hover:text-white'
+                  }`}
+                >
+                  {cat === 'ALL' ? '🌟 All Items' : cat}
+                </button>
+              ))}
+            </div>
+
+            {/* 2-Column Responsive Grid on Mobile, 2 on Tablet, 3 on Desktop */}
+            <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-2.5 sm:gap-4">
+              {filteredProducts.map(p => {
                 const currentQty = cart[p.id] || 0;
 
                 return (
-                  <div key={p.id} className="glass-panel p-4 flex flex-col justify-between border border-slate-800 hover:border-emerald-500/40 transition-all">
-                    <div className="flex gap-3 items-start mb-3">
-                      <img src={p.image_url} alt={p.name} className="w-14 h-14 rounded-xl object-cover border border-slate-700 shrink-0" />
-                      <div>
-                        <div className="font-bold text-white text-sm">{p.name}</div>
-                        <div className="text-xs text-emerald-400 font-hindi">{p.hindi_name}</div>
-                        <div className="text-xs text-slate-400 mt-1">{p.category}</div>
+                  <div 
+                    key={p.id} 
+                    className={`glass-panel flex flex-col justify-between overflow-hidden border transition-all duration-200 ${
+                      currentQty > 0 
+                        ? 'border-emerald-500/80 bg-emerald-950/20 shadow-lg shadow-emerald-950/50 ring-1 ring-emerald-500/30' 
+                        : 'border-slate-800/80 hover:border-emerald-500/40 bg-slate-900/60'
+                    }`}
+                  >
+                    {/* Produce Image + Badges */}
+                    <div className="relative aspect-[4/3] sm:aspect-video w-full bg-slate-950 overflow-hidden">
+                      <img 
+                        src={p.image_url} 
+                        alt={p.name} 
+                        className="w-full h-full object-cover transition-transform duration-300 hover:scale-105" 
+                        loading="lazy" 
+                      />
+                      <div className="absolute top-1.5 left-1.5 flex gap-1 flex-wrap">
+                        <span className="text-[9px] font-bold bg-slate-950/80 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded-md backdrop-blur-md font-mono">
+                          {p.default_unit}
+                        </span>
                       </div>
+                      {currentQty > 0 && (
+                        <span className="absolute top-1.5 right-1.5 text-[9px] font-black bg-emerald-500 text-slate-950 px-2 py-0.5 rounded-md shadow-md animate-fade-in">
+                          ✓ {currentQty} {p.default_unit}
+                        </span>
+                      )}
                     </div>
 
-                    <div className="flex items-center justify-between border-t border-slate-800/80 pt-3 mt-1">
+                    {/* Produce Info */}
+                    <div className="p-2.5 sm:p-3 flex-1 flex flex-col justify-between">
                       <div>
-                        <div className="text-[10px] text-slate-400 font-bold uppercase">UNIT</div>
-                        <div className="text-xs font-bold text-slate-200 bg-slate-800 px-2 py-0.5 rounded font-mono">{p.default_unit}</div>
+                        <div className="font-bold text-white text-xs sm:text-sm line-clamp-1 leading-tight" title={p.name}>
+                          {p.name}
+                        </div>
+                        <div className="text-[11px] text-emerald-400 font-hindi mt-0.5 truncate">
+                          {p.hindi_name}
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">
+                          {p.category}
+                        </div>
                       </div>
 
-                      {/* Quantity Selector */}
-                      <div className="flex items-center gap-2 bg-slate-900 p-1 rounded-xl border border-slate-800">
-                        <button 
-                          onClick={() => handleQtyChange(p.id, -1.0)}
-                          className="w-7 h-7 rounded-lg bg-rose-500/20 text-rose-400 font-bold text-sm flex items-center justify-center hover:bg-rose-500/30"
-                        >
-                          -
-                        </button>
-                        <span className="text-xs font-bold text-white px-1 font-mono">
-                          {currentQty > 0 ? `${currentQty} ${p.default_unit}` : `0 ${p.default_unit}`}
-                        </span>
-                        <button 
-                          onClick={() => handleQtyChange(p.id, 1.0)}
-                          className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 font-bold text-sm flex items-center justify-center hover:bg-emerald-500/30"
-                        >
-                          +
-                        </button>
+                      {/* Stepper Controls */}
+                      <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between gap-1">
+                        <div className="flex items-center w-full justify-between bg-slate-950/90 p-1 rounded-xl border border-slate-800">
+                          <button 
+                            type="button"
+                            onClick={() => handleQtyChange(p.id, -1.0)}
+                            disabled={currentQty <= 0}
+                            className={`w-7 h-7 rounded-lg font-bold text-sm flex items-center justify-center transition-all ${
+                              currentQty > 0 
+                                ? 'bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 active:scale-95' 
+                                : 'bg-slate-900 text-slate-600 cursor-not-allowed'
+                            }`}
+                          >
+                            -
+                          </button>
+                          <span className={`text-xs font-mono font-bold px-1 ${currentQty > 0 ? 'text-emerald-400 font-extrabold' : 'text-slate-400'}`}>
+                            {currentQty > 0 ? `${currentQty} ${p.default_unit}` : `0 ${p.default_unit}`}
+                          </span>
+                          <button 
+                            type="button"
+                            onClick={() => handleQtyChange(p.id, 1.0)}
+                            className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 font-bold text-sm flex items-center justify-center hover:bg-emerald-500/30 active:scale-95"
+                          >
+                            +
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -602,7 +766,7 @@ export default function ClientPortal({ clients, products, cutoffInfo, onPlaceOrd
           </div>
 
           {/* Cart & Checkout Panel */}
-          <div className="glass-panel p-6 space-y-6 border-l-2 border-l-emerald-500">
+          <div id="checkout-panel" className="glass-panel p-5 sm:p-6 space-y-6 border-l-2 border-l-emerald-500 scroll-mt-6">
             <div>
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 🛒 Order Summary
@@ -638,7 +802,7 @@ export default function ClientPortal({ clients, products, cutoffInfo, onPlaceOrd
                   </div>
                   <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5 mt-2">
                     <p className="text-[11px] text-amber-300 leading-snug">
-                      ℹ️ <b>Market Rate Rule:</b> Daily mandi market rates & actual weighed quantities will be itemized in your PDF invoice upon morning dispatch.
+                      ℹ️ <b>Market Rate Rule:</b> Daily mandi market rates &amp; actual weighed quantities will be itemized in your PDF invoice upon morning dispatch.
                     </p>
                   </div>
                 </div>
@@ -685,6 +849,33 @@ export default function ClientPortal({ clients, products, cutoffInfo, onPlaceOrd
             </form>
           </div>
 
+        </div>
+      )}
+
+      {/* MOBILE FLOATING QUICK CART PILL - JUMP TO ORDER SUMMARY WITHOUT SCROLLING */}
+      {activeSubTab === 'catalog' && Object.keys(cart).length > 0 && (
+        <div className="fixed bottom-20 left-3 right-3 z-40 md:hidden animate-fade-in">
+          <button
+            type="button"
+            onClick={() => {
+              const el = document.getElementById('checkout-panel');
+              if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }
+            }}
+            className="w-full bg-gradient-to-r from-emerald-600 to-green-500 text-white p-3 rounded-2xl shadow-[0_10px_30px_rgba(16,185,129,0.5)] border border-emerald-400/40 flex items-center justify-between font-bold text-xs active:scale-[0.98] transition-transform"
+          >
+            <div className="flex items-center gap-2.5">
+              <span className="text-lg bg-slate-950/40 p-1.5 rounded-xl border border-white/20">🛒</span>
+              <div className="text-left">
+                <div className="font-black text-sm">{Object.keys(cart).length} Produce in Cart</div>
+                <div className="text-[10px] text-emerald-100 font-mono">{calculateTotalWeight()} Total Units</div>
+              </div>
+            </div>
+            <span className="bg-slate-950/60 px-3.5 py-1.5 rounded-xl text-white font-extrabold flex items-center gap-1 border border-white/20 shadow-md">
+              Review &amp; Place Order ➔
+            </span>
+          </button>
         </div>
       )}
 
@@ -746,6 +937,129 @@ export default function ClientPortal({ clients, products, cutoffInfo, onPlaceOrd
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* 3. My Profile & Settings Tab */}
+      {activeSubTab === 'profile' && (
+        <div className="max-w-2xl mx-auto space-y-6">
+          <div className="glass-panel p-5 sm:p-6 space-y-5 border-l-4 border-l-emerald-500 shadow-xl">
+            <div className="flex justify-between items-start border-b border-slate-800 pb-4">
+              <div>
+                <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+                  <span>👤</span> Profile &amp; Contact Details
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Manage your purchaser name, dispatch phone number, and delivery address.
+                </p>
+              </div>
+              <span className={clientInfo.client_type === 'HOTEL' ? 'badge badge-hotel' : 'badge badge-cafe'}>
+                {clientInfo.client_type}
+              </span>
+            </div>
+
+            <form onSubmit={handleSaveProfile} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-300 block mb-1">Business / Hotel / Cafe Name</label>
+                <input 
+                  type="text"
+                  value={profileBusinessName}
+                  onChange={e => setProfileBusinessName(e.target.value)}
+                  className="w-full text-xs"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-300 block mb-1">Contact Person / Purchaser Name</label>
+                  <input 
+                    type="text"
+                    value={profileContactPerson}
+                    onChange={e => setProfileContactPerson(e.target.value)}
+                    className="w-full text-xs"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-300 block mb-1">Registered Phone (Login Mobile)</label>
+                  <input 
+                    type="tel"
+                    value={profilePhone}
+                    onChange={e => setProfilePhone(e.target.value)}
+                    className="w-full text-xs"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-300 block mb-1">Delivery Address &amp; Landmarks</label>
+                <textarea 
+                  rows={2}
+                  value={profileAddress}
+                  onChange={e => setProfileAddress(e.target.value)}
+                  className="w-full text-xs"
+                  placeholder="e.g. Shop 4, Varaccha Main Road, Near Station"
+                  required
+                />
+              </div>
+
+              <button 
+                type="submit"
+                disabled={profileSubmitting}
+                className="emerald-btn w-full justify-center text-xs py-3 font-bold shadow-lg shadow-emerald-950/40"
+              >
+                {profileSubmitting ? 'Saving Profile Changes...' : '💾 Save Profile Details'}
+              </button>
+            </form>
+          </div>
+
+          {/* Account & Billing Terms (Read Only) */}
+          <div className="glass-panel p-5 space-y-3 border border-slate-800">
+            <h4 className="text-xs font-extrabold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+              <span>💳</span> Account &amp; Credit Terms
+            </h4>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+                <div className="text-[10px] text-slate-400 uppercase font-semibold">Payment Cycle</div>
+                <div className="font-bold text-white mt-0.5">{clientInfo.payment_cycle || 'WEEKLY'}</div>
+              </div>
+              <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+                <div className="text-[10px] text-slate-400 uppercase font-semibold">Credit Limit</div>
+                <div className="font-bold text-emerald-400 mt-0.5 font-mono">₹{clientInfo.credit_limit?.toLocaleString('en-IN') || '50,000'}</div>
+              </div>
+              <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+                <div className="text-[10px] text-slate-400 uppercase font-semibold">Current Udhaar</div>
+                <div className="font-bold text-amber-400 mt-0.5 font-mono">₹{clientInfo.current_balance?.toLocaleString('en-IN') || '0.00'}</div>
+              </div>
+              <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+                <div className="text-[10px] text-slate-400 uppercase font-semibold">Ordering Status</div>
+                <div className="font-bold mt-0.5">
+                  {clientInfo.is_order_locked ? (
+                    <span className="text-rose-400 font-extrabold">🔒 Locked</span>
+                  ) : (
+                    <span className="text-emerald-400 font-extrabold">🟢 Active</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Logout Section */}
+          <div className="glass-panel p-5 border border-rose-500/30 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div>
+              <div className="font-extrabold text-white text-sm">Session Management</div>
+              <div className="text-xs text-slate-400">Log out from your device if you are done placing orders.</div>
+            </div>
+            <button 
+              type="button"
+              onClick={handleLogout}
+              className="outline-btn text-xs text-rose-400 border-rose-500/40 hover:bg-rose-500/10 font-bold px-5 py-2.5 rounded-xl shrink-0 w-full sm:w-auto text-center"
+            >
+              🚪 Logout from Account
+            </button>
+          </div>
         </div>
       )}
 

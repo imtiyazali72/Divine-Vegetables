@@ -8,7 +8,7 @@ export default function MobileBottomNav({ activeTab, setActiveTab, viewMode, set
           
           <button
             onClick={() => setActiveSubTab && setActiveSubTab('catalog')}
-            className={`flex flex-col items-center gap-1 px-4 py-1.5 rounded-xl transition-all ${
+            className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all ${
               activeSubTab === 'catalog'
                 ? 'bg-emerald-600 text-white font-bold shadow-md shadow-emerald-900/50'
                 : 'text-slate-400 hover:text-slate-200'
@@ -20,7 +20,7 @@ export default function MobileBottomNav({ activeTab, setActiveTab, viewMode, set
 
           <button
             onClick={() => setActiveSubTab && setActiveSubTab('my-orders')}
-            className={`flex flex-col items-center gap-1 px-4 py-1.5 rounded-xl transition-all ${
+            className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all ${
               activeSubTab === 'my-orders'
                 ? 'bg-emerald-600 text-white font-bold shadow-md shadow-emerald-900/50'
                 : 'text-slate-400 hover:text-slate-200'
@@ -28,6 +28,18 @@ export default function MobileBottomNav({ activeTab, setActiveTab, viewMode, set
           >
             <span className="text-base">🚚</span>
             <span className="text-[10px] font-bold">Deliveries</span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubTab && setActiveSubTab('profile')}
+            className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all ${
+              activeSubTab === 'profile'
+                ? 'bg-emerald-600 text-white font-bold shadow-md shadow-emerald-900/50'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <span className="text-base">👤</span>
+            <span className="text-[10px] font-bold">Profile</span>
           </button>
 
         </div>
