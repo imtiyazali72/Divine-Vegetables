@@ -751,11 +751,13 @@ def place_order(payload: dict, db: Session = Depends(get_db)):
             except Exception:
                 pass
                 
-        if client.credit_limit and client.credit_limit > 0:
-            if (client.current_balance + est_new_order) > client.credit_limit:
+        current_bal = float(getattr(client, 'current_balance', 0.0) or 0.0)
+        cred_lim = float(getattr(client, 'credit_limit', 50000.0) or 50000.0)
+        if cred_lim > 0:
+            if (current_bal + est_new_order) > cred_lim:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Credit Limit Exceeded! Current Balance (₹{client.current_balance:.2f}) + New Order (₹{est_new_order:.2f}) exceeds approved limit of ₹{client.credit_limit:.2f}."
+                    detail=f"Credit Limit Exceeded! Current Balance (₹{current_bal:.2f}) + New Order (₹{est_new_order:.2f}) exceeds approved limit of ₹{cred_lim:.2f}."
                 )
         
     if db.query(models.Product).count() == 0:
@@ -766,19 +768,40 @@ def place_order(payload: dict, db: Session = Depends(get_db)):
     for o in overrides:
         overrides_map[o.product_id] = o.custom_rate
         
-    # Date Normalization (MM/DD/YYYY -> YYYY-MM-DD)
+    # Date Normalization (supports YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY)
     raw_date = str(payload.get("delivery_date", "")).strip()
-    delivery_date_str = datetime.date.today().strftime("%Y-%m-%d")
+    delivery_date_str = (datetime.date.today() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
     if raw_date:
         if "/" in raw_date:
-            parts = raw_date.split("/")
+            parts = [p.strip() for p in raw_date.split("/")]
             if len(parts) == 3:
-                if len(parts[2]) == 4:
-                    delivery_date_str = f"{parts[2]}-{parts[0].zfill(2)}-{parts[1].zfill(2)}"
+                yr = parts[2] if len(parts[2]) == 4 else parts[0]
+                d1 = parts[0] if yr == parts[2] else parts[1]
+                d2 = parts[1] if yr == parts[2] else parts[2]
+                if int(d1) > 12:  # d1 is day
+                    delivery_date_str = f"{yr}-{d2.zfill(2)}-{d1.zfill(2)}"
+                else:  # d1 is month or standard
+                    delivery_date_str = f"{yr}-{d1.zfill(2)}-{d2.zfill(2)}"
         elif "-" in raw_date:
-            delivery_date_str = raw_date
+            parts = [p.strip() for p in raw_date.split("-")]
+            if len(parts) == 3:
+                if len(parts[0]) == 4:
+                    delivery_date_str = f"{parts[0]}-{parts[1].zfill(2)}-{parts[2].zfill(2)}"
+                elif len(parts[2]) == 4:
+                    delivery_date_str = f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
 
-    order_num = f"DV-{datetime.date.today().strftime('%Y%m%d')}-{db.query(models.Order).count() + 101}"
+    # Collision-free unique order number generation
+    import time
+    order_seq = db.query(models.Order).count() + 101
+    today_str = datetime.date.today().strftime('%Y%m%d')
+    order_num = None
+    for attempt in range(100):
+        candidate = f"DV-{today_str}-{order_seq + attempt}"
+        if not db.query(models.Order).filter(models.Order.order_number == candidate).first():
+            order_num = candidate
+            break
+    if not order_num:
+        order_num = f"DV-{today_str}-{int(time.time() * 1000) % 100000}"
     
     try:
         order = models.Order(
@@ -834,9 +857,10 @@ def place_order(payload: dict, db: Session = Depends(get_db)):
                 products_by_id[prod.id] = prod
                 products_by_name[prod.name] = prod
                 
-            base_rate = prod.base_rate_hotel if client.client_type == "HOTEL" else prod.base_rate_cafe
-            rate = overrides_map.get(prod.id, base_rate)
-            subtotal = qty * rate
+            raw_base = prod.base_rate_hotel if client.client_type == "HOTEL" else prod.base_rate_cafe
+            base_rate = float(raw_base if raw_base is not None else 30.0)
+            rate = float(overrides_map.get(prod.id, base_rate) or base_rate)
+            subtotal = float(qty * rate)
             estimated_total += subtotal
             
             order_item = models.OrderItem(
@@ -860,7 +884,10 @@ def place_order(payload: dict, db: Session = Depends(get_db)):
             driver_phone="+91 98765 12345",
             current_location="Mandi Central Warehouse",
             route_status="Order Placed - Pending Weight Packing",
-            estimated_arrival="6:00 AM"
+            estimated_arrival="6:00 AM",
+            latitude=21.1458,
+            longitude=79.0882,
+            updated_at=datetime.datetime.utcnow()
         )
         db.add(route)
         
@@ -918,6 +945,12 @@ def get_orders(client_id: Optional[int] = None, db: Session = Depends(get_db)):
             "order_number": o.order_number,
             "client_name": c.business_name if c else "Unknown",
             "client_type": c.client_type if c else "HOTEL",
+            "client": {
+                "id": c.id,
+                "business_name": c.business_name,
+                "client_type": c.client_type,
+                "phone": c.phone
+            } if c else None,
             "order_date": o.order_date.strftime("%d %b %Y %I:%M %p"),
             "order_date_iso": o.order_date.strftime("%Y-%m-%d"),
             "delivery_date": o.delivery_date,

@@ -316,6 +316,10 @@ export default function ClientPortal({ clients, products, cutoffInfo, onPlaceOrd
     }
 
     setSubmitting(true);
+    const safetyTimer = setTimeout(() => {
+      setSubmitting(false);
+    }, 28000);
+
     const itemsPayload = Object.entries(cart).map(([prodId, qty]) => {
       const prod = displayProducts.find(p => p.id === parseInt(prodId));
       return {
@@ -355,6 +359,7 @@ export default function ClientPortal({ clients, products, cutoffInfo, onPlaceOrd
       const errorDetail = err?.message || "Could not connect to backend API";
       alert(`⚠️ Order Submission Error: ${errorDetail}\n\nDon't worry! Your selected cart items are safely saved so you can retry submitting.`);
     } finally {
+      clearTimeout(safetyTimer);
       setSubmitting(false);
     }
   };

@@ -47,6 +47,45 @@ export default function App() {
   const [soundMode, setSoundMode] = useState(() => localStorage.getItem('divine_sound_mode') || 'continuous');
   const [newOrderToast, setNewOrderToast] = useState(null);
   const prevOrdersRef = useRef(null);
+  const knownOrderNumbersRef = useRef(new Set());
+
+  // Persistent tracking of seen/dismissed order numbers to avoid showing old orders repeatedly
+  const getDismissedOrders = () => {
+    try {
+      const saved = localStorage.getItem('divine_dismissed_orders');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  };
+
+  const addDismissedOrder = (orderNum) => {
+    if (!orderNum) return;
+    try {
+      const current = getDismissedOrders();
+      if (!current.includes(orderNum)) {
+        const updated = [...current, orderNum].slice(-100);
+        localStorage.setItem('divine_dismissed_orders', JSON.stringify(updated));
+      }
+    } catch (e) {}
+  };
+
+  const handleDismissNotification = (orderNum) => {
+    if (orderNum) addDismissedOrder(orderNum);
+    setNewOrderToast(null);
+  };
+
+  // 15-second auto-dismiss for notification toast so it doesn't stay permanently
+  useEffect(() => {
+    if (!newOrderToast) return;
+    const timer = setTimeout(() => {
+      if (newOrderToast?.orderNumber) {
+        addDismissedOrder(newOrderToast.orderNumber);
+      }
+      setNewOrderToast(null);
+    }, 15000);
+    return () => clearTimeout(timer);
+  }, [newOrderToast]);
 
   const handleSetSoundMode = (mode) => {
     setSoundMode(mode);
@@ -300,25 +339,49 @@ export default function App() {
       }
       if (Array.isArray(prodRes)) setProducts(prodRes);
       if (Array.isArray(ordRes)) {
-        setOrders(ordRes);
+        if (ordRes.length > 0 || prevOrdersRef.current === null) {
+          setOrders(ordRes);
+        }
 
         // Detect new order arrival during auto-polling (ONLY FOR AUTHENTICATED OWNER ADMIN)
         const isAuth = sessionStorage.getItem('divine_admin_auth') === 'true';
-        if (isAuth && prevOrdersRef.current !== null && ordRes.length > prevOrdersRef.current.length) {
-          const newestOrder = ordRes[0];
-          if (newestOrder) {
-            const clientName = newestOrder.client?.business_name || "B2B Hotel Client";
-            setNewOrderToast({
-              clientName: clientName,
-              orderNumber: newestOrder.order_number,
-              amount: newestOrder.estimated_total
+        const dismissedOrders = getDismissedOrders();
+
+        if (isAuth) {
+          if (prevOrdersRef.current === null) {
+            // First dashboard load: remember all existing database orders so ancient orders never trigger alerts!
+            knownOrderNumbersRef.current = new Set(ordRes.map(o => o.order_number).filter(Boolean));
+          } else if (ordRes.length > 0) {
+            // Identify orders that are strictly brand new and NOT dismissed
+            const newlyArrivedOrders = ordRes.filter(o => 
+              o.order_number && 
+              !knownOrderNumbersRef.current.has(o.order_number) &&
+              !dismissedOrders.includes(o.order_number)
+            );
+
+            // Register all current orders to known orders set
+            ordRes.forEach(o => {
+              if (o.order_number) knownOrderNumbersRef.current.add(o.order_number);
             });
-            if (soundMode === 'once') {
-              playOrderSound(true);
+
+            if (newlyArrivedOrders.length > 0) {
+              const newestOrder = newlyArrivedOrders[0];
+              const clientName = newestOrder.client?.business_name || "B2B Hotel Client";
+              setNewOrderToast({
+                clientName: clientName,
+                orderNumber: newestOrder.order_number,
+                amount: newestOrder.estimated_total
+              });
+              if (soundMode === 'once') {
+                playOrderSound(true);
+              }
             }
           }
         }
-        prevOrdersRef.current = ordRes;
+
+        if (ordRes.length > 0 || prevOrdersRef.current === null) {
+          prevOrdersRef.current = ordRes;
+        }
       }
       if (Array.isArray(clientRes)) setClients(clientRes);
     } catch (err) {
@@ -378,7 +441,8 @@ export default function App() {
       const res = await smartFetch('/orders/place', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(orderPayload)
+        body: JSON.stringify(orderPayload),
+        timeout: 30000
       });
       
       let data = {};
@@ -394,7 +458,8 @@ export default function App() {
         throw new Error(data.detail || data.message || `Order placement failed with status ${res.status}`);
       }
 
-      await fetchData();
+      // Refresh admin data in background without blocking client confirmation
+      fetchData().catch(() => {});
       return data;
     } catch (err) {
       console.error("Error submitting order to backend:", err);
@@ -670,13 +735,17 @@ export default function App() {
           </div>
           <div className="flex flex-col gap-1.5 shrink-0">
             <button 
-              onClick={() => { setActiveTab('fulfill'); setViewMode('owner'); setNewOrderToast(null); }}
+              onClick={() => { 
+                handleDismissNotification(newOrderToast.orderNumber);
+                setActiveTab('fulfill'); 
+                setViewMode('owner'); 
+              }}
               className="text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 active:scale-95 px-3.5 py-2 rounded-xl text-white whitespace-nowrap shadow-lg shadow-emerald-950/60 flex items-center gap-1"
             >
               <span>👁️ View</span>
             </button>
             <button 
-              onClick={() => setNewOrderToast(null)}
+              onClick={() => handleDismissNotification(newOrderToast.orderNumber)}
               className="text-[10px] text-slate-400 hover:text-white text-center font-bold"
             >
               Dismiss ✕

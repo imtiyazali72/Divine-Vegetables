@@ -19,7 +19,7 @@ export const getApiBaseUrl = () => {
 
 export const API_BASE = getApiBaseUrl();
 
-// Fast-path network fetch utility with zero-delay fallback
+// Fast-path network fetch utility with resilient timeout & zero-delay fallback
 export const smartFetch = async (endpointPath, options = {}) => {
   let cleanPath = endpointPath.startsWith('/') ? endpointPath : `/${endpointPath}`;
   
@@ -31,10 +31,22 @@ export const smartFetch = async (endpointPath, options = {}) => {
   }
   
   const primaryUrl = `${API_BASE}${cleanPath}`;
+  const timeoutMs = options.timeout || 25000;
+
+  const fetchWithTimeout = async (url, opts) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { ...opts, signal: opts.signal || controller.signal });
+      return res;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
   
   // 1. Instant execution on primary configured API endpoint
   try {
-    const res = await fetch(primaryUrl, options);
+    const res = await fetchWithTimeout(primaryUrl, options);
     if (res.ok || res.status < 500) {
       return res;
     }
@@ -57,7 +69,7 @@ export const smartFetch = async (endpointPath, options = {}) => {
     for (const devUrl of devCandidates) {
       if (devUrl === primaryUrl) continue;
       try {
-        const devRes = await fetch(devUrl, options);
+        const devRes = await fetchWithTimeout(devUrl, options);
         if (devRes.ok || devRes.status < 500) {
           return devRes;
         }
@@ -65,5 +77,5 @@ export const smartFetch = async (endpointPath, options = {}) => {
     }
   }
   
-  throw new Error("Backend server is unreachable. Please try again.");
+  throw new Error("Backend server is taking too long to respond or is unreachable. Please retry.");
 };
